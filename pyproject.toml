@@ -1,0 +1,14 @@
+[project]
+name = "kap"
+version = "0.0.0"
+description = "KAP"
+requires-python = ">=3.13"
+dependencies = [
+    "requests>=2.34",
+]
+
+# Workflow:
+#   uv sync     -> creates .venv and installs exactly these deps
+#   uv add X    -> add a new dependency (updates this file + uv.lock)
+#   uv run X.py -> run inside the project env without activating anything
+[tool.uv]

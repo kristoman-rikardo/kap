@@ -24,7 +24,7 @@
 | `H` | Horisont i år (typisk 3–5) , `t1 = t0 + H` |
 | `R_i` | Kumulativ **totalavkastning** for aksje *i* over `[t0, t1]`, fra justerte kurser (splitt + utbytte reinvestert) |
 | `R_m` | Kumulativ totalavkastning for benchmark (S&P 500 **Total Return** i MVP) |
-| `R_f` | Kumulativ risikofri avkastning: geometrisk sammensatt 3M T-bill over perioden (FRED, f.eks. TB3MS) |
+| `R_f` | Kumulativ risikofri avkastning: geometrisk sammensatt 3M T-bill over perioden (FMP `treasury-rates`, 3M; FRED som fallback) |
 | `r` | Annualisert avkastning: `r = (1+R)^(1/H) − 1` |
 | `α_i` | Annualisert alpha per aksje: `α_i = r_i − r_m` |
 
@@ -65,7 +65,7 @@ Bonus   = +25 hvis a_i > 0 for alle 5 kort («perfekt runde», config)
 
 ### 3.2 Diagnostikk (vises, scorer ikke)
 
-* **Treffprosent:** andel Long/Short-valg der `sign(valg) = sign(α_i)`. Cash inngår ikke; rapporteres som «unngått tap» (kortets α < 0) eller «mistet oppgang» (α > 0).
+* **Treffprosent:** andel Long/Short-valg der `sign(valg) = sign(α_i)`. **Cash scorer på alpha (`α_cash`), men får en egen, ikke-poenggivende «treff»-merking:** valgte du cash på et kort med *negativ absoluttavkastning* (`r_i < 0`) registreres et **«unngått tap»-treff** – en psykologisk bekreftelse på et rasjonelt, risikoaversivt valg, selv om alpha-poengene er negative i et stigende marked. Cash på et kort som *steg* (`r_i > 0`) merkes «mistet oppgang». Dette skiller bevisst den *økonomiske realiteten* (poeng = alpha, alternativkostnad) fra den *psykologiske bekreftelsen* (treff på absolutt unngått tap) – uten å røre scoringen.
 * **Rå alpha per kort** vises ved siden av poeng – poeng er spill-laget, alpha er sannhetslaget. Alltid begge.
 
 ### 3.3 Talleksempel (enhetstest-fixture, H = 5, R_m = +60 % ⇒ r_m = 9,9 %, R_f = +8 % ⇒ r_f = 1,6 %)
@@ -119,6 +119,7 @@ w1 = 0.7   w2 = 0.3   IR_τ = 1.0   (config)
 
 * **Ledd 1 (magnitude):** Hvor mye slo du indeksen, risikojustert *implisitt* gjennom tanh-metningen.
 * **Ledd 2 (effisiens):** Alpha per enhet aktiv risiko. **Information ratio er aktiv forvaltnings Sharpe** – og det riktige målet her, ikke Sharpe: Sharpe måler totalrisiko mot risikofritt; IR måler nettopp det spillet skal lære, seleksjonsferdighet relativt til benchmark. Grinold & Kahns fundamentallov, `IR ≈ IC·√BR` (information coefficient × bredde), knytter den direkte til treffsikkerhet × antall uavhengige veddemål – som er spillets to dimensjoner. Bonus: brukerens empiriske IC (korrelasjonen mellom valgene og realisert alpha-fortegn over historikken) er målbar og hører hjemme i «Din investorprofil».
+* **Kalibrering av `IR_τ` (kritisk):** settes bevisst strengt (=1.0) nettopp for at tanh-platået ikke skal nås billig. Egenskapen til tanh er at den deriverte dør på toppen; settes `IR_τ` for lavt, treffer ett heldig veddemål asymptoten, og insentivet for gode marginale valg (vekting, diversifisering) forsvinner. To ting hindrer dette sammen: (a) strengt `IR_τ`, og (b) at *realisert* TE står i nevneren – en konsentrert portefølje med ett heldig kort får høy TE → lav IR → ingen metning. Det skal være matematisk umulig å nå taket uten *både* høy IC *og* reell breadth.
 
 **Insentivanalyse (sjekk mot prinsipp 1):**
 * *Lottokupong* (alt i ett volatilt navn): stor mulig α_p, men ledd 1 metter på ±70 og høy TE demper ledd 2 → begrenset oppside, symmetrisk begrenset nedside. Variansjakt lønner seg ikke.
@@ -165,7 +166,7 @@ Score_M ≈ 32      Feedback: seleksjon +2.5, vekting +1.5, N_eff 5.6, IR 0.50
 
 ---
 
-## 5. Real-Time Mode – skisse (låses i `08_realtime.md`)
+## 5. Real-Time Mode – scoring-kontrakt (spec'et fullt i `08_realtime.md`)
 
 * Løpende NAV-serie (ingen eksterne kontantstrømmer ⇒ tidsvektet avkastning er bare daglig lenking av NAV).
 * Score = rullerende IR over 90d- og 365d-vinduer mot indeks, samme tanh-avbildning. Kort vindu vises med «lav signifikans»-merke (90 dager IR er mest støy – si det høyt).
@@ -177,11 +178,11 @@ Score_M ≈ 32      Feedback: seleksjon +2.5, vekting +1.5, N_eff 5.6, IR 0.50
 ## 6. Edge cases (normative regler)
 
 1. **Konkurs/delisting til null:** `R_i = −100 %` fra delist-dato. Long-sleeve → 0. Short-sleeve → `2w` (+100 %, maks gevinst realisert). Junior: `a_i` beregnes som vanlig (short på konkurskandidat er maksgevinst – tanh holder det på ≤ +100 poeng).
-2. **Oppkjøp/fusjon:** Totalavkastning frem til delist-dato, deretter reinvesteres provenyet i **indeksen** for resthorisonten (standard backtest-konvensjon; alternativet risikofritt er strengere – config-flagg, default indeks). Clue-setningen skal nevne oppkjøpet.
+2. **Oppkjøp/fusjon (asymmetrisk long vs short):** *Long:* totalavkastning frem til oppkjøpsdato, så reinvesteres provenyet i **indeksen** for resthorisonten (standard backtest; risikofritt-alternativ er config-flagg). *Short:* oppkjøp med premie er et **takeover-/short-squeeze-tap** – shorten lukkes til oppkjøpskursen. Manager-sleeven `V_j = max(0, w(2−G))` fanger dette kontinuerlig: premie +40 % → G=1,4 → sleeven taper 40 %; premie ≥ +100 % → G≥2 → **utslettelse** (margin call). I Junior amortiseres engangshoppet i annualisert alpha (bevisst forenkling, §3.2), men reveal-teksten navngir squeezen. Clue-setningen nevner oppkjøpet i begge tilfeller. *(Vi bruker bevisst den kontinuerlige sleeve-formelen framfor en foreslått «overnatt-gap > 30 % → maks negativ»-regel: sleeven gir allerede korrekt asymmetrisk utslettelse uten en vilkårlig terskel eller intradag-gap-data.)*
 3. **Manglende kursdata > 10 handelsdager i horisonten:** kortet skulle vært stoppet i datavasken (`03_data_pipeline`-grensesnitt); scoringmotoren kaster valideringsfeil, gjetter aldri.
 4. **Short-sleeve truffet gulvet:** sleeve forblir 0 resten av horisonten (ingen gjenoppstandelse) – margin call er endelig.
 5. **Valuta:** MVP er USD-only (univers, indeks, r_f). Flervaluta (Manager global) krever egen regel – lokal TR-indeks per marked eller alt målt i USD; beslutning utsatt til universet utvides.
-6. **r_f-kilde:** 3M T-bill (FRED), geometrisk sammensatt over `[t0, t1]`. Lagres per batch slik at `α_cash` er deterministisk og revisjonsbar.
+6. **r_f-kilde:** 3M T-bill (FMP `treasury-rates`, kolonne `month3`; FRED fallback), geometrisk sammensatt over `[t0, t1]`. *Enhet er prosent/år* (verifisert Q30), så daglig faktor er `(1+annual_rate/100)^(1/252)−1` (jf. 03 S5.2). Lagres per batch slik at `α_cash` er deterministisk og revisjonsbar.
 7. **Batch med horisont som ender < 30 handelsdager fra i dag:** ikke tillatt (Curator-constraint) – fasit må være «ferdig historie».
 
 ---
@@ -217,7 +218,7 @@ Alle felter brukerrettet – hvert tall har en setningsmal i frontend (prinsipp 
 ## 8. Fasit-portefølje og reveal-semantikk
 
 * **«Fasit (etterpåklokskap)»** – eksplisitt merket som hindsight: Junior = Long alle α>0, Short alle α<0; Manager = beste oppnåelige score gitt constraints (vises som tall, ikke som «du burde»).
-* Cash i fasiten: aldri optimal ex post (|α| > 0 nesten sikkert). Derfor MÅ reveal-teksten bære nyansen: «Cash kostet deg 8 %/år mot indeks denne runden. Det betyr ikke at det var dumt – det betyr at trygghet koster i stigende marked.» Uten denne setningen lærer spillet bort at cash alltid er feil, hvilket er usant ex ante.
+* Cash i fasiten: aldri optimal ex post (|α| > 0 nesten sikkert). Derfor MÅ reveal-teksten bære nyansen begge veier. Når cash var *dyrt* (markedet steg): «Cash kostet deg 8 %/år mot indeks denne runden. Det betyr ikke at det var dumt – det betyr at trygghet koster i stigende marked.» Når cash *unngikk et reelt tap* (`r_i < 0`): feire det – «Bra vurdert: aksjen falt 18 %, og du slapp unna. Alpha ble likevel negativ fordi indeksen stod, men kapitalbevaring var rett kall her.» Uten denne toveis-nyansen lærer spillet enten at cash alltid er feil (usant ex ante) eller at det alltid er trygt (usant i bull).
 * Referanselinjer i grafen: din portefølje, (Manager: likevektsvarianten din), indeksen.
 
 ---

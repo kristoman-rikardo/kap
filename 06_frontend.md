@@ -7,7 +7,7 @@
 
 ## 1. Designprinsipper
 
-1. **Et tenkeinstrument, ikke en spilleautomat.** Dette er det viktigste frontend-prinsippet, og det binder UI-et til appens tese (Instructions §1, Buffett-skolen). Vi unngår bevisst dopamin-mønstrene fra trading-apper: ingen blinkende rød/grønn på hver tick, ingen konfetti-på-alt, ingen kunstig hastverk. Den *blinde* runden hjelper allerede – brukeren ser ikke utfall mens hun velger, så det finnes ingen live-P&L å jage. UI-et skal føles rolig, presist og premium.
+1. **Engasjerende spill, men ikke en spilleautomat.** Det bærende skillet er smalt og hardt: **ingen utfallsfeedback under blind seleksjon.** En tikkende P&L mens du velger ville latt deg jage utfallet – nettopp biaset den blinde runden fjerner (Instructions §1, Buffett-skolen). Alt *rundt* seleksjonen skal derimot være tilfredsstillende og belønnende: vektige swipe-tilbakemeldinger, reveal-flippen, en score som teller opp, streak-feiring, delingskortet. Linjen går ikke mellom «rolig» og «spennende», men mellom *å belønne innsikt* og *å fabrikkere hastverk eller falske live-innsatser*. Målgruppen er både bankfolk og ungdom – det skal føles polert og morsomt, ikke sterilt og ikke kasino. Reward-animasjoner (dopamin med smak) hører hjemme i reveal/streak; den blinde runden forblir utfallsfri.
 2. **Swipe-muskelminne deles på tvers av moduser.** Høyre/venstre/opp betyr det samme i Junior, Manager og (senere) Kartoteket. Lær det én gang.
 3. **Anonymitet håndheves også i klienten.** Klienten *kan ikke* vise det den ikke har: `GET`-svar inneholder ingen ticker/navn/epoke (05 §5). Reveal-data finnes først etter submit. Frontend skal aldri logge eller cache reveal-felt på en måte som lekker før tid.
 4. **Progressiv avsløring av kompleksitet.** Fagbegrep er tap-for-å-utvide, og definisjonsdybden styres av `knowledge_level` (Instructions §3, §6). Nybegynneren drukner ikke; eksperten slipper noobfakta.
@@ -67,7 +67,7 @@ enum Choice { long, short, cash }          // swipe: høyre/venstre/opp
     required MacroBox macro,
     required Fundamentals fundamentals,
     required double revCagr3y, required double epsCagr3y,
-    required String cap,                   // 'small'|'mid'|'large' (relativ, 04 §5.2)
+    required String cap,                   // 'small'|'mid'|'large' (bånd, 04 §5.2)
     required String sectorCoarse,
     required String narrative,             // anonymisert (ingen navn/ticker)
     required String sectorSentiment,
@@ -157,15 +157,17 @@ Tre lag (Instructions §3), fargekodet og rolig:
 ## 9. Swipe-mekanikk
 
 * `flutter_card_swiper`: **høyre = Long, venstre = Short, opp = Cash/skip**. Overlay-etikett vises under draget («LONG»/«SHORT»/«CASH»).
-* Haptisk feedback + dempet lyd ved valg (whoosh) – diskré, ikke kasino («kaching» nedtones; jf. §1).
+* Haptisk feedback + lyd ved valg (whoosh) – tilfredsstillende, men ikke kasino. Reward-lydene kan være tydeligere i reveal/streak enn under selve seleksjonen (jf. §1).
 * Teller «n/5» synlig. Manager-vekting skjer *ikke* per swipe (det er en egen bekreftelses-skjerm, 04 §12 / 01 §2B) – Junior er ren sveiping.
 
 ## 10. Resultat & reveal
 
 * **Score = alpha mot indeks** (01 §3), aldri presentert som «du tjente X kr». Tekstfeedback skaleres etter alpha (oppmuntring/gratulasjon/terging, 01-stil) – men i tråd med §1: feire innsikt, ikke flaks.
 * **Graf (fl_chart):** «Din portefølje» vs «Indeks» over horisonten; Manager legger til likevekts-varianten (01 §4.4).
-* **Reveal per kort (`RevealCardTile`):** flip-animasjon → «Det var Tesla! Du valgte Short. −180 %-poeng alpha.» + clue-setning + `event`-merke (oppkjøpt/avnotert) + **«Utforsk selskapet»** → company-skjerm (frø til Kartoteket, 05 §4.4). Dette er eneste sted truth vises.
-* **Idealportefølje** vises eksplisitt som etterpåklokskap (01 §8), inkl. cash-nyansen («cash kostet X %/år – men trygghet koster i stigende marked»).
+* **Reveal per kort (`RevealCardTile`):** flip-animasjon → «Det var Tesla! Du valgte Short. −180 %-poeng alpha.» + clue-setning + `event`-merke + **«Utforsk selskapet»** → company-skjerm (frø til Kartoteket, 05 §4.4). Dette er eneste sted truth vises.
+  * **Cash-treffmerke (01 §6.6):** valgte du cash på et kort med negativ absoluttavkastning, vis et eget ✓-«unngått tap»-merke ved siden av (de negative) alpha-poengene – en psykologisk bekreftelse adskilt fra scoren. Cash på en stiger merkes «mistet oppgang».
+  * **Event-framing:** `event:"acquired"` på en *short* rammes inn som short-squeeze («Shorten din ble squeezet – selskapet ble kjøpt opp med premie»); på en *long* som gevinst. `event:"delisted"` → konkurs.
+* **Idealportefølje** vises eksplisitt som etterpåklokskap (01 §8), inkl. cash-nyansen begge veier («cash kostet X %/år i et stigende marked» / «cash bevarte kapital da aksjen falt»).
 
 ## 11. Delingskort (ShareCard) – Wordle-mekanikken
 
@@ -185,7 +187,7 @@ Tre lag (Instructions §3), fargekodet og rolig:
 
 ## 14. Estetisk retning
 
-* **Rolig fintech, ikke kasino.** Fra `flutter-ai-ui-skill`: bruk en fintech-palett og *Minimal Flat*/*Enterprise Dark*-sjangrene; **unngå** Dark Neon / glødende effekter som signaliserer hype. Material 3 (`ThemeData(useMaterial3: true)`, `ColorScheme.fromSeed`) med innebygd dark mode.
+* **Polert fintech med smakfull juice, ikke kasino.** Fra `flutter-ai-ui-skill`: bruk en fintech-palett og *Minimal Flat*/*Enterprise Dark*-sjangrene; **unngå** Dark Neon / glødende effekter som signaliserer hype. Material 3 (`ThemeData(useMaterial3: true)`, `ColorScheme.fromSeed`) med innebygd dark mode. **Reward-motion er tillatt og ønsket** i reveal og streak (flip, opptelling, nøktern feiring); den blinde seleksjonen holdes bevisst utfallsfri og rolig (§1).
 * **Farge med omhu:** rød/grønn brukes kun i *reveal* (utfall), aldri som angst-skapende live-signal. Under blind spilling finnes ingen utfallsfarge – det er en feature (§1).
 * **Typografi:** ett tydelig, seriøst fontpar (skillets `flutter_typography.csv` har ferdige par); rikelig med pust/spacing.
 

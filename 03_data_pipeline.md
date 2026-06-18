@@ -20,18 +20,23 @@
 
 ## 2. Verifisert FMP-virkelighet (låser antakelsene)
 
-Probet mot Premium-relevante endepunkter. Dette er grunnlaget hele spec'en hviler på:
+Probet **empirisk mot Premium-nøkkel (juni 2026)**. Dette er grunnlaget hele spec'en hviler på (fullstendige svar i `fmp_api_questions.md`):
 
 | Krav (Instructions §4) | Endepunkt (`stable`) | Status | Merknad |
 |---|---|---|---|
-| Survivorship – konstituenthistorikk | `GET /stable/historical-sp500-constituent` | ✅ | Inn-/utmeldingsdatoer → rekonstruér univers per dato |
-| Survivorship – delistede + kurs | `GET /stable/delisted-companies` + `GET /stable/historical-price-eod/dividend-adjusted?symbol=` | ✅ **(Premium)** | Probe på Starter ga `402 "Premium Query Parameter"`. **Avhenger av aktivt Premium-abonnement.** |
-| Look-ahead – filing dates | `GET /stable/income-statement?symbol=` har `filingDate`/`acceptedDate` | ✅ | Eksakt casing bekreftes i API Viewer (05 §7) |
-| Totalavkastning – justert kurs | `GET /stable/historical-price-eod/dividend-adjusted?symbol=` | ✅ | Dedikert splitt+utbytte-justert endepunkt (ikke `…/full`) |
-| Benchmark (TR) | `GET /stable/historical-price-eod/dividend-adjusted?symbol=SPY` | ✅ **(låst, #4)** | `^SP500TR` har grunn historikk; SPY-`adjClose` brukes som investerbar TR-proxy over hele spennet (begrunnet §5.1) |
-| Risikofri + makro | `GET /stable/treasury-rates`, `GET /stable/economic-indicators` | ✅ | FMP single-vendor; FRED kun fallback (05 §9) |
+| **Survivorship – konstituenthistorikk** | `GET /stable/historical-sp500-constituent` | ✅ | **Den reelle survivorship-kilden.** 1 520 endringer tilbake til **1957**; hver rad = én bytte (`date`, `symbol`/added, `removedTicker`, `reason`). |
+| Univers i dag | `GET /stable/sp500-constituent` | ✅ | 503 selskaper (referansepunkt for tilbake-spoling) |
+| Nylig delistede (flagg) | `GET /stable/delisted-companies` | ⚠️ | **Rullerende ~4-mnd-vindu, IKKE arkiv** (eldste ≈ feb 2026). Brukes kun til `is_delisted`-flagg på nylige; historiske delistede kommer fra `removedTicker`-loggen. |
+| **Kurs for delistede** | `GET /stable/historical-price-eod/dividend-adjusted?symbol=` | ✅ **(Premium)** | Verifisert for SIVB/FRC/BBBY. **Krever `from/to`** ellers kun ~5 år (Q24). |
+| Look-ahead – filing dates | `GET /stable/income-statement?symbol=` → `filingDate`/`acceptedDate` | ✅ | Bekreftet ~34 dager etter periodeslutt; også på kvartalsrader og delistede |
+| Totalavkastning – justert kurs | `GET /stable/historical-price-eod/dividend-adjusted?symbol=` | ✅ | Felt `adjClose` (ekte TR, verifisert); `…/full` har *ikke* `adjClose` |
+| Benchmark (TR) | `GET /stable/historical-price-eod/dividend-adjusted?symbol=SPY` | ✅ **(låst, #4)** | SPY tilbake til **1993**. `^SP500TR` **ikke tilgjengelig** (402/tom) → SPY-`adjClose` er eneste TR-kilde (§5.1) |
+| Risikofri | `GET /stable/treasury-rates` → `month3` | ✅ | **Prosent/år** (1,54 = 1,54 %), tilbake til **1990**; krever `from/to` |
+| Makro | `GET /stable/economic-indicators?name=…` | ✅ | Navn: `realGDP`, `inflationRate`, `unemploymentRate`, `federalFunds`, `CPI`, `GDP`; krever `from/to` |
+| Restatements | — | ❌ | FMP gir **én versjon per periode** (ingen restatement-historikk). Bitemporal nøkkel er fremtidssikring (§5.3). |
+| Bulk | — | ❌ | Ingen bulk-endepunkter på Premium; backfill = per-symbol (§9) |
 
-**Base & paths:** `https://financialmodelingprep.com/stable/` (gjeldende; v3 er «legacy»). Den fulle, docs-grunnede endepunktlisten ligger i **05 §7–§9** og er autoritativ for denne spec'en. Probe-scriptet (`fmp_probe.py`) bør oppdateres til `stable`-stier og er sannhetskilden for hvilke paths/felt *din* nøkkel eksponerer.
+**Base & paths:** `https://financialmodelingprep.com/stable/` (gjeldende; v3 er «legacy»). Autoritativ endepunktliste i **05 §7–§9**. Auth via HTTP-header `apikey:` (verifisert). Feilklasser: `401`→`AuthError`, `402`→`PremiumGatedError`, `429`→backoff.
 
 ---
 
@@ -79,12 +84,12 @@ class FMPClient:
 
 ### 4.2 Økonomidata (FMP single-vendor)
 
-Risikofri rente + makro hentes fra FMPs egne økonomi-endepunkter (samme klient/nøkkel som resten — én leverandør, én rate-limit): `GET /stable/treasury-rates` (3M T-bill + alle løpetider) og `GET /stable/economic-indicators?name=…` (BNP, inflasjon, arbeidsledighet). Se 05 §9. *FRED beholdes kun som fallback* (`https://api.stlouisfed.org/fred/...`, serier `DTB3`/`CPIAUCSL`/`GDPC1`) hvis FMPs økonomiserier viser seg tynne for en periode.
+Risikofri rente + makro hentes fra FMPs egne økonomi-endepunkter (samme klient/nøkkel — én leverandør, én rate-limit): `GET /stable/treasury-rates` (kolonne `month3` = 3M, **i prosent/år**, tilbake til 1990) og `GET /stable/economic-indicators?name=…` med navnene `realGDP`, `inflationRate` (YoY %), `unemploymentRate`, `federalFunds`, `CPI`, `GDP`. **Begge krever `from/to`** — uten gir treasury bare ~66 siste dager og economic-indicators bare 3–11 siste observasjoner. Se 05 §9. *FRED beholdes kun som fallback* hvis en FMP-serie viser seg tynn.
 
 ### 4.3 Idempotent last & proveniens
 
 * Alle `INSERT` er `INSERT ... ON CONFLICT (<naturlig nøkkel>) DO UPDATE/NOTHING`.
-* `financials`: `ON CONFLICT (company_id, period_date, period_type, filing_date) DO NOTHING` – refetch av samme filing er no-op; restatement (ny `filing_date`) gir ny rad (prinsipp 2).
+* `financials`: `ON CONFLICT (company_id, period_date, period_type, filing_date) DO NOTHING` – refetch av samme filing er no-op; restatement (ny `filing_date`) gir ny rad (prinsipp 2). *Merk (verifisert Q21): FMP eksponerer i praksis kun **én versjon per periode** – ingen restatement-historikk. Append-on-restatement er derfor fremtidssikring som først aktiveres med en rikere kilde.*
 * Proveniens: kolonner `source text`, `fetched_at timestamptz`, `api_version text` på rå-/landingslaget; en `ingestion_runs(id, stage, started_at, finished_at, rows_in, rows_out, errors jsonb)` for observabilitet.
 * **Rå-landing (anbefalt, valgfri MVP):** lagre rå JSON per `(endpoint, symbol, fetched_at)` (egen tabell eller objektlagring). Lar oss reparere transformasjonsfeil uten ny henting – billig forsikring.
 
@@ -96,13 +101,17 @@ Risikofri rente + makro hentes fra FMPs egne økonomi-endepunkter (samme klient/
 
 **Mål:** for enhver `decision_date D`, kunne svare hva som *faktisk var investerbart* da (02 §3.2/§4.2).
 
-1. Hent nåværende S&P 500-konstituenter (`GET /stable/sp500-constituent`) + endringshistorikk (`GET /stable/historical-sp500-constituent`). Hver endring har dato + symbol (inn/ut).
-2. Rekonstruér temporalt medlemskap: spol historikken bakover fra dagens liste, åpne/lukk `daterange`-intervaller → `index_constituents(index_code='SP500', company_id, membership)`.
-3. Hent delistede (`GET /stable/delisted-companies`) → sett `companies.is_delisted=true`, `delisted_date`. **Årsak (konkurs/fusjon) leveres ikke** av endepunktet – men `acquired` vs `delisted` kan klassifiseres ved seal via M&A-endepunktet (`/stable/mergers-acquisitions-search`, 05 §8.6 / 04 §5.3); `delisting_reason` settes `null` i v1.
-4. Hent ticker-endringer (`GET /stable/symbol-change`) for å holde `company_id`-mappingen korrekt ved symbolbytter (02 §4 ticker-gjenbruk).
-5. Kurshistorikk for delistede hentes i S4 (Premium) – serien ender naturlig på `delisted_date`.
+**Reell kilde (verifisert):** survivorship for S&P 500 bygges fra **endringsloggen** `historical-sp500-constituent` (1 520 rader tilbake til 1957), *ikke* fra `delisted-companies` (som er et rullerende ~4-mnd-vindu, ikke et arkiv – Q11). MVP er avgrenset til S&P 500-universet; small-caps som aldri var i indeksen dekkes ikke, og det er akseptabelt.
 
-*Premium-avhengighet:* uten Premium gir steg 4 402 og survivorship-fiksen kollapser til «kun overlevere» (dokumentert i forrige sparring). Med Premium er den ekte.
+1. Hent dagens liste (`GET /stable/sp500-constituent`, 503 selskaper) + endringsloggen (`GET /stable/historical-sp500-constituent`). **Hver logg-rad = én bytte:** `date` (ikrafttredelse), `symbol` (lagt til), `removedTicker`/`removedSecurity` (fjernet), `reason` (fritekst, f.eks. «acquisition by Devon Energy»).
+2. Rekonstruér temporalt medlemskap: start fra dagens liste og **spol bakover** ved å reversere hver endring med `date > D` (legg tilbake `removedTicker`, fjern `symbol`) → `index_constituents(index_code='SP500', company_id, daterange)`.
+3. **Historiske delistede/utgåtte** identifiseres fra `removedTicker`-loggen (selskaper som forlot indeksen). Sett `companies.is_delisted=true` for de som ikke er i dagens liste; `delisted_date` ≈ logg-`date` (indeks-exit), forfinet til faktisk siste handelsdag fra der kursserien ender (S4).
+4. **Nylig delistede (flagg):** `GET /stable/delisted-companies` brukes *kun* til å oppdatere `is_delisted`/`delisted_date` på selskaper delistet de siste ~4 mnd. Paginér med dedup på `symbol` (overlapp observert mellom sider – Q5).
+5. **`delisting_reason`/event:** klassifiseres ved seal (04 §5.3) fra logg-`reason`-teksten (inneholder «acquisition»/«merger» → `acquired`) + sluttkurs-nær-null-heuristikk (→ `bankruptcy`); **M&A-endepunktet er ikke brukbart** (kun navnesøk, mangler data – Q37). `delisting_reason` lagres `null` i v1.
+6. **Ticker-gjenbruk:** `symbol-change` er også rullerende (~mar 2026, Q14) → brukes kun til nylige navnebytter. Historisk ticker-mapping bygges fra `removedTicker`-loggen. Et gjenbrukt symbol (f.eks. BBBY, Q12) får egen `company_id`; kursserien **trunkeres på `delisted_date`** per `company_id` (S4).
+7. Kurshistorikk for delistede hentes i S4 (Premium, med `from/to`) – serien ender naturlig ved delisting.
+
+*Premium-avhengighet:* delisted-kurser krever Premium (verifisert SIVB/FRC/BBBY); uten kollapser survivorship-fiksen til «kun overlevere».
 
 ### S2 – Entiteter
 
@@ -113,7 +122,7 @@ Risikofri rente + makro hentes fra FMPs egne økonomi-endepunkter (samme klient/
 
 ### S3 – Finans (point-in-time, append-only)
 
-Hent per selskap (`stable`): income statement (`/stable/income-statement`), balance sheet (`/stable/balance-sheet-statement`), cash flow (`/stable/cash-flow-statement`), key-metrics (`/stable/key-metrics`) — **både `period=annual` og `period=quarter`**, med `limit` høyt nok til ønsket dybde (Premium: opptil 30 år).
+Hent per selskap (`stable`): income statement (`/stable/income-statement`), balance sheet (`/stable/balance-sheet-statement`), cash flow (`/stable/cash-flow-statement`), key-metrics + ratios (`/stable/key-metrics`, `/stable/ratios`) — **både `period=annual` og `period=quarter`**, med `limit` for ønsket dybde (verifisert: `limit=40` → 40 årsrader, AAPL tilbake til **1986**; statements bruker `limit`, ikke `from/to`).
 
 **Feltmapping (FMP → 02-skjema):**
 
@@ -121,46 +130,52 @@ Hent per selskap (`stable`): income statement (`/stable/income-statement`), bala
 |---|---|---|
 | `period_date` | income `date` | periodeslutt (gyldighetstid) |
 | `period_type` | income `period` | `FY`→annual, `Q1..Q4`→quarter |
-| `filing_date` | `filingDate` (ev. dato-del av `acceptedDate`) | transaksjonstid (look-ahead-anker, §5-#5 låst på acceptedDate-basis); eksakt casing bekreftes i API Viewer (05 §7) |
+| `filing_date` | `filingDate` (fallback: dato-del av `acceptedDate`) | transaksjonstid (look-ahead-anker; verifisert ~34 dager etter periodeslutt, også på kvartal/delistede) |
 | `revenue`, `net_income` | income `revenue`, `netIncome` | |
-| `eps` | income `epsDiluted` (foretrekk diluted; bekreft casing) | |
+| `eps` | income `epsDiluted` (foretrekk diluted; `eps` er basic) | |
 | `shares_out` | income `weightedAverageShsOutDil` | **trengs for P/E, P/S, cap ved seal** (prinsipp 3) |
-| `debt_to_equity` | beregn: `totalDebt / totalStockholdersEquity` (balance) | vi beregner selv → kontroll |
-| `gross/operating/net_margin` | beregn fra income, ev. kryssjekk mot ratios | |
+| `debt_to_equity` | beregn: `totalDebt / totalStockholdersEquity` (balance) | `totalDebt` levert direkte (kort+lang); vi beregner → kontroll |
+| `gross/operating/net_margin` | beregn (`grossProfit/revenue` osv.) el. ratios `grossProfitMargin`/`operatingProfitMargin`/`netProfitMargin` | marginer finnes *ikke* i income-statement |
 | `fcf` | cash flow `freeCashFlow` | |
-| `roic` | key-metrics `roic` | FMP-levert; kryssjekk |
-| `cap_category` | **referanse** (FMP), IKKE kortvendt | kortets cap regnes ved seal fra `price(t0)·shares` *eller* `historical-market-capitalization` (05 §8.5) |
-| `pe`, `ps` | **referanse** (FMP, periodeslutt-basis), lagres i `extra` | **IKKE kortvendt** – kortets multipler regnes ved seal |
+| `roic` | key-metrics **`returnOnInvestedCapital`** | FMP-levert (feltnavnet er ikke `roic`); kryssjekk |
+| `cap_category` | **referanse** (FMP), IKKE kortvendt | kortets cap regnes ved seal fra `price(t0)·weightedAverageShsOutDil` (aktive: ev. `historical-market-capitalization`, men den gir 0 rader for delistede – 05 §8.5) |
+| `pe`, `ps` | **referanse** (ratios `priceToEarningsRatio`/`priceToSalesRatio`, periodeslutt-basis), lagres i `extra` | **IKKE kortvendt** – kortets multipler regnes ved seal |
 
 **Prisuavhengige avledninger (OK i pipeline):** 3-års CAGR på revenue/EPS regnes fra point-in-time-rader og kan fryses. **Prisavhengige (P/E, P/S, market cap → cap-kategori) regnes IKKE her** – kun ved seal i 04 (prinsipp 3).
 
-**TTM:** for kvartalsbaserte multipler trengs TTM (rullerende 4 kvartaler). Beslutning (02 §14-6): pipelinen lagrer kvartalsrader rått; TTM-aggregering gjøres som en *avledning ved behov* (view/funksjon), ikke som lagrede `period_type='ttm'`-rader, for å unngå dobbel sannhet. Avledningen må selv respektere `filing_date` (kun kvartaler kjent ved `decision_date`). *FMPs `*-ttm`-endepunkter gir kun **nåtids**-TTM (ikke point-in-time) og brukes derfor bare til Kartoteket (05 §8.3) – aldri til historiske batcher.*
+**TTM & Q4-fellen (viktig):** for kvartalsbaserte multipler trengs TTM (rullerende 4 kvartaler), men en naiv `Q1+Q2+Q3+Q4`-summering er *farlig*: Q4 bærer ofte årlige revisjoner/nedskrivninger, så summen spriker fra selskapets rapporterte FY. To strategier:
+
+* **MVP (robust, anbefalt):** Curator forankrer `decision_date` **rett etter FY-`filingDate`** (04 §4) → bruk **FY-tallene direkte**, ingen TTM-aggregering. Sidesteg hele Q4-problemet, og passer MVPs kuraterte dato-sett (én post-FY-dato per selskap-år er rikelig).
+* **Skalert (kontinuerlig drift):** bruk `TTM = siste FY + inneværende YTD − fjorårets YTD-på-samme-punkt` (bygger på selskapets egne YTD-tall som avstemmer mot FY), ikke 4-kvartals-sum. *Forbehold:* dette krever **YTD-tall**; FMPs standardiserte kvartaler kan være *diskrete* (per-kvartal) – verifiser om FMPs Q4 = `FY − 9M` (en plugg, som da ville avstemme per konstruksjon) eller en uavhengig figur, før 4-kvartals-sum stoles på.
+
+Uansett strategi: aggregeringen er en *avledning ved behov* (view/funksjon), ikke lagrede `period_type='ttm'`-rader (02 §14-6, unngår dobbel sannhet), og må respektere `filing_date`. *FMPs `*-ttm`-endepunkter gir kun **nåtids**-TTM – kun Kartoteket (05 §8.3), aldri historiske batcher.*
 
 ### S4 – Kurser (totalavkastning)
 
-1. `GET /stable/historical-price-eod/dividend-adjusted?symbol=` → `prices(company_id, date, adj_close, close_raw)`. `adj_close` = utbyttejustert sluttkurs (splitt+utbytte; bekreft feltnavn i API Viewer, 05 §8.4). Rå OHLC fra `…/full` eller ujustert fra `…/non-split-adjusted` kun for debug/`close_raw`.
-2. Hent for **hele universet inkl. delistede** (Premium). Delisted-serie ender på `delisted_date` – håndteres i avkastningsmotoren (01 §6, edge cases).
-3. **Konsistens-krav (kritisk, #4):** samme leverandør og samme justeringsmetode for *både* aksjer og benchmark. Alpha = aksje-TR − benchmark-TR er kun meningsfull hvis teller og nevner er justert likt. Derav SPY-`adjClose` som benchmark (S5), ikke en indeks fra en annen kilde/metode.
+1. `GET /stable/historical-price-eod/dividend-adjusted?symbol=&from=&to=` → `prices(company_id, date, adj_close, close_raw)`. Responsen er en **flat array** med felt `symbol, date, adjOpen, adjHigh, adjLow, adjClose, volume`; `adj_close` = `adjClose` (ekte total return, verifisert Q26). Rå `close` for `close_raw`/splitt-deteksjon hentes fra `…/full` (som *mangler* `adjClose` – Q27).
+2. **`from/to` er obligatorisk (Q24):** uten dem returnerer endepunktet kun ~5 år (~1255 rader). Backfill bruker `from=<periodestart−2år>&to=<t1>`; inkrementelt `from=<siste lagrede dato>`. Aldri `limit`.
+3. Hent for **hele universet inkl. delistede** (Premium). Delisted-serie ender naturlig ved delisting; **trunkér på `delisted_date` per `company_id`** for å unngå at en gjenbrukt ticker (BBBY, Q12) blander to selskapers data inn i samme serie.
+4. **Konsistens-krav (kritisk, #4):** samme leverandør og justeringsmetode for *både* aksjer og benchmark. Alpha = aksje-TR − benchmark-TR er kun meningsfull hvis teller og nevner er justert likt. Derav SPY-`adjClose` som benchmark (S5).
 
 ### S5 – Benchmark + risikofri
 
 #### 5.1 Benchmark (SPY-proxy, låst)
 
-`GET /stable/historical-price-eod/dividend-adjusted?symbol=SPY` → `index_prices(index_code='SP500TR_SPY', date, tr_close=adj_close)`.
+`GET /stable/historical-price-eod/dividend-adjusted?symbol=SPY&from=&to=` → `index_prices(index_code='SP500TR_SPY', date, tr_close=adjClose)`. SPY-historikk verifisert tilbake til **1993**.
 
-**Begrunnelse (oppfyller #4-kravene «nøyaktig, hele perioden, konsistent»):** `^SP500TR` har grunn historikk hos FMP; SPY-`adjClose` går tilbake til 1993, er utbyttejustert (ekte total return), og er *samme instrument og metode* som aksjedataene (S4) – maksimal konsistens og kryss-batch-sammenliknbarhet over et spenn godt lengre enn 6 år. Kostnaden er SPYs avgiftsdrift (~0,09 %/år), som er konstant og ubetydelig, og strengt tatt gjør benchmarket *investerbart* (et ærligere mål). VOO (2010+) er alternativ for nyere epoker, men SPY velges for maksimal historikk. Den lille driften dokumenteres i reveal-metodikken.
+**Begrunnelse (oppfyller #4-kravene «nøyaktig, hele perioden, konsistent»):** `^SP500TR` er **ikke tilgjengelig** hos FMP (verifisert Q28: 402/tom array) – SPY-`adjClose` er derfor eneste TR-kilde. Den går tilbake til 1993, er ekte total return (verifisert: SPY 2005-adjClose er 48 % under rå `close`, dvs. akkumulert utbytte trukket bakover – Q26), og er *samme instrument og metode* som aksjedataene (S4) → maksimal konsistens og kryss-batch-sammenliknbarhet. Kostnaden er SPYs avgiftsdrift (~0,09 %/år), som er konstant, ubetydelig, og strengt tatt gjør benchmarket *investerbart* (et ærligere mål). Driften dokumenteres i reveal-metodikken.
 
 #### 5.2 Risikofri (FMP treasury-rates)
 
-`GET /stable/treasury-rates` (3M-kolonne, forventet `month3`; bekreft i API Viewer) → `risk_free(date, tenor='3M', annual_rate)`. Daglig faktor på handelsdager: `(1+annual_rate)^(1/252)−1` (må matche 01 §2/§6.6). Curator fryser `R_f`/`r_f`/`alpha_cash` per batch fra denne serien. *FRED `DTB3` som fallback.*
+`GET /stable/treasury-rates?from=&to=` → `risk_free(date, tenor='3M', annual_rate)`, kolonne **`month3`**. **Enhet: prosent/år** (verifisert Q30 – `1.54` betyr 1,54 %/år), så daglig faktor på handelsdager er `(1 + annual_rate/100)^(1/252) − 1` (NB `/100`; må matche 01 §2/§6.6). Historikk tilbake til **1990**; `from/to` obligatorisk (uten: kun ~66 siste dager). Curator fryser `R_f`/`r_f`/`alpha_cash` per batch. *FRED `DTB3` som fallback.*
 
 ### S6 – Makro (FMP economic-indicators + AI)
 
 Makro er *regime-nivå*, ikke daglig. Beregn månedlig (kortet leser raden for `decision_date`s måned). Tallene lagres numerisk (Curator trenger dem til regime-/cash-optimalitets-logikk, 04 §4), men *vises som bånd* på kortet, og AI-setningen må bestå epoke-lekkasjesjekken (04 §5.7).
 
-1. `rate_direction`: sammenlign 3M-rente (`treasury-rates`) mot ~12 mnd før → `rising/flat/falling`.
-2. `rate_level`: terskler på absolutt nivå → `low/neutral/high` (konfig).
-3. `inflation`, `gdp_growth`: fra `GET /stable/economic-indicators?name=…` (CPI/GDP, YoY; BNP kvartalsvis → forward-fill).
+1. `rate_direction`: sammenlign `treasury-rates.month3` mot ~12 mnd før → `rising/flat/falling` (treasury foretrekkes framfor `federalFunds`: daglig + historikk til 1990 + markedsbasert – Q34).
+2. `rate_level`: terskler på absolutt `month3`-nivå → `low/neutral/high` (konfig).
+3. `inflation`: `economic-indicators?name=inflationRate` (YoY %, daglig). `gdp_growth`: `name=realGDP` (kvartalsvis → YoY + forward-fill). **`from/to` obligatorisk** (uten: kun 3–11 siste obs – Q33). Gyldige navn: `realGDP`, `GDP`, `CPI`, `inflationRate`, `unemploymentRate`, `federalFunds`.
 4. `ai_sentence`: batch-LLM tar de tørre tallene → én kontekstsetning *uten årstall* (Instructions §3), leak-sjekket (04 §5.7). Cached.
 
 → `macro_context(date, region='US', rate_level, rate_direction, inflation, gdp_growth, ai_sentence)`.
@@ -172,13 +187,15 @@ Makro er *regime-nivå*, ikke daglig. Beregn månedlig (kortet leser raden for `
 #### 7.1 Generering
 LLM får point-in-time-tall (S3) + makro (S6) + (for clue/result_explanation) fasit-avkastning, og bes returnere **JSON** med de fire feltene. `narrative`/`sector_sentiment` er kortvendt og **strippet for navn/ticker/produkt/beløp**; `clue`/`result_explanation` er reveal-innhold.
 
+**Hindsight-vakt (strukturell, ikke bare prompt):** `narrative`/`sector_sentiment` genereres fra **utelukkende point-in-time-input** – ingen data med dato/`filing_date` > `decision_date`, og **aldri** fasit-avkastningen, mates inn i kort-narrativets prompt. Utfallsdata går *kun* til `clue`/`result_explanation` (reveal-only). Det er en arkitekturgaranti som er sterkere enn en prompt-formaning. Prompten forsterker den eksplisitt: «skriv som en analytiker som står *på* denne datoen og *ikke kan vite* hva som skjer videre – beskriv bildet slik det var der og da, aldri i etterpåklokskap.» Ingen «slik gikk det / som det viste seg»-formuleringer i kortvendt tekst. (Hvis et nyhets-/kontekstinnspill brukes, må det ha hard as-of-grense ≤ `decision_date` og samme leak-/epoke-sjekk som resten – §7.2 / 04 §5.7.)
+
 #### 7.2 Leak-sjekk (to-trinns, hard port)
 1. **Determinisk:** regex/strengmatch av `narrative`+`sector_sentiment` mot selskapsnavn, ticker, kjente produkt-/merkenavn (fra en alias-liste per selskap). Treff → underkjent.
-2. **LLM-dommer:** gi *kun* det anonymiserte narrativet til en separat LLM-kall: «Kan du identifisere selskapet? Svar med kandidat + konfidens.» Høy konfidens / korrekt → underkjent.
+2. **Adversariell LLM-dommer:** en standard «er dette anonymisert?»-dommer er for overbærende. Gi i stedet *kun* det anonymiserte narrativet til et separat kall med en **adversariell** systemprompt: *«Du er en kynisk finanshistoriker. Gjett hvilket selskap dette er ut fra de underliggende mønstrene – du belønnes for å treffe. List dine 3 beste gjetninger.»* Er det korrekte selskapet blant **topp-3** → underkjent, og narrativet regenereres på et høyere abstraksjonsnivå. (Adversariell framing eliciterer modellens faktiske gjettekapasitet, ikke en mild dom.)
 
 Underkjente regenereres automatisk (maks N forsøk, så flagges for manuell review). Kun `leak_check_passed=true` kan inngå i en sealet batch (02 §7, §13).
 
-**Epoke-lekkasjesjekk (andre dimensjon, 04 §5.7):** samme to-trinns mønster kjøres på `narrative`/`sector_sentiment` for *kalenderepoke*: regex mot epokedefinerende termer (pandemi, finanskrise, dot-com, Lehman, 9/11, Covid, krig) + LLM-dommer «kan du tidfeste dette til ±2 år?» → underkjent ved treff. Sammen med bånd-visning av makro-tallene (S6) lukker dette epoke-gjettings-kanalen.
+**Epoke-lekkasjesjekk (andre dimensjon, 04 §5.7):** samme to-trinns mønster med **samme adversielle framing** kjøres på `narrative`/`sector_sentiment` for *kalenderepoke*: regex mot epokedefinerende termer (pandemi, finanskrise, dot-com, Lehman, 9/11, Covid, krig) + adversariell dommer «tidfest dette så presist du kan – du belønnes for å treffe innen ±2 år». Treff innen båndet → underkjent. Sammen med bånd-visning av makro-tallene (S6) lukker dette epoke-gjettings-kanalen.
 
 #### 7.3 Kandidatpool (løser høna-og-egget)
 Curator (04) trekker kort fra et univers, men narrativer må finnes *før* seal. Løsning: pipelinen pre-genererer narrativer for **det kvalifiserte universet per mål-`decision_date`** (avgrenset mengde, ikke alle selskap × alle datoer). Mål-datoene er en konfigurert liste (de periodene vi vil ha batcher fra). Kostnadskontroll: dette er den dominerende LLM-kostnaden – hold mål-dato-listen bevisst kort i MVP. *Alternativ (lat):* generér ved første seal-forsøk og cache; enklere, men gir latency-spiss ved seal. MVP: pre-generér for en liten mål-dato-liste.
@@ -197,9 +214,9 @@ Valideringsregler (feil → `data_quarantine(table, row_ref, rule, detail, quara
 
 ### S9 – Orkestrering
 
-* **Backfill (engang, tungt):** hele universet, full historikk. Rekkefølge S1→S2→S3/S4→S5/S6→S8. Ved ~1k selskaper × {income,balance,cashflow,metrics,prices} ≈ tusenvis av kall; på 700/min er det minutter, ikke timer. Kjør i symbol-batcher med checkpointing (gjenoppta etter avbrudd).
-* **Inkrementelt (nattlig):** prices fra siste lagrede dato; økonomi-serier (`treasury-rates`/`economic-indicators`) oppdateres; konstituent- og `symbol-change`-lister diffes.
-* **Kvartalsvis:** refetch siste ~2 kvartalers regnskap (fanger restatements via ny `filing_date`); generér narrativer for nye mål-datoer; refresh `company_profiles` (Kartoteket).
+* **Backfill (engang, tungt):** hele universet, full historikk via `from/to`. Rekkefølge S1→S2→S3/S4→S5/S6→S8. **Ingen bulk-endepunkter på Premium (verifisert Q38)** → per-symbol-iterasjon. Ved ~1k selskaper × {income,balance,cashflow,metrics,ratios,prices} ≈ 5–6k kall; på 700/min ≈ 7–10 minutter. Symbol-batcher med checkpointing (gjenoppta etter avbrudd).
+* **Inkrementelt (nattlig):** prices `from=<siste lagrede dato>`; økonomi-serier (`treasury-rates`/`economic-indicators`) oppdateres med `from/to`; dagens `sp500-constituent` diffes mot loggen; `delisted-companies` + `symbol-change` (rullerende) sjekkes for *nylige* endringer.
+* **Kvartalsvis:** refetch siste ~2 kvartalers regnskap; generér narrativer for nye mål-datoer; refresh `company_profiles` (Kartoteket). *Merk: refetch fanger i praksis ikke restatements (FMP gir én versjon per periode, Q21) – det fanger nye/sent innleverte perioder.*
 * **Reproduserbarhet:** hver kjøring logges i `ingestion_runs`; rå-landing + append-only finans gjør at en gitt batch kan rekonstrueres bit-eksakt.
 
 ---
@@ -208,7 +225,7 @@ Valideringsregler (feil → `data_quarantine(table, row_ref, rule, detail, quara
 
 **→ 02_datamodell:** skriver A–D + `data_quarantine` + `ingestion_runs`. *Avklaringer som oppdaterer 02:* (a) `financials.pe/ps/cap_category` er **referanse-only** (flyttes ev. til `extra`); kortets multipler/cap regnes ved seal. (b) Legg til `financials.shares_out` (fra `weightedAverageShsOutDil`) – nødvendig for seal-tids P/E, P/S, cap. (c) `index_prices.index_code = 'SP500TR_SPY'`.
 
-**→ 04_curator:** leser `index_constituents` (univers per dato), `financials` (point-in-time via 02 §6.2-spørringen), `prices`/`index_prices`/`risk_free` (avkastning), `narratives` (leak-sjekket). Curator **beregner ved seal**: P/E, P/S, cap-kategori (fra `price(t0)·shares` el. `historical-market-capitalization`), per-kort alpha/avkastning, og fryser benchmark/rf. Kaller `coverage_ok` som seal-gate.
+**→ 04_curator:** leser `index_constituents` (univers per dato), `financials` (point-in-time via 02 §6.2-spørringen), `prices`/`index_prices`/`risk_free` (avkastning), `narratives` (leak-sjekket). Curator **beregner ved seal**: P/E, P/S, cap-kategori (fra `price(t0)·weightedAverageShsOutDil`; `historical-market-capitalization` kun for aktive – 0 rader for delistede), per-kort alpha/avkastning, event-klassifisering (logg-`reason` + sluttkurs-heuristikk, *ikke* M&A-endepunkt), og fryser benchmark/rf. Kaller `coverage_ok` som seal-gate.
 
 **→ 01_scoring:** garantien om «hullfrie serier `[t0−2år, t1]`» (01 §7) leveres av S4/S5 + S8-dekningssjekken. De to ekstra årene er ex-ante-kovariansens trailing-vindu (før `t0`, point-in-time-trygt).
 
@@ -216,20 +233,21 @@ Valideringsregler (feil → `data_quarantine(table, row_ref, rule, detail, quara
 
 ## 7. Edge cases (ingest)
 
-1. **Manglende/uventet filing-dato:** klienten leser `filingDate` (fallback dato-del av `acceptedDate`). Hvis begge mangler → karantene (kan ikke garantere point-in-time). Eksakt feltcasing bekreftes i API Viewer (05 §7).
+1. **Manglende/uventet filing-dato:** klienten leser `filingDate` (fallback dato-del av `acceptedDate`). Hvis begge mangler → karantene. (Feltnavn/casing bekreftet Q15/Q16.)
 2. **Delisted uten kurs (ikke-Premium):** 402 → `PremiumGatedError`, kjøring stopper høylytt (ikke delvis univers).
-3. **Restatement:** ny `filing_date` for eksisterende periode → ny rad (append-only). Aldri overskriv.
+3. **Restatement:** skjemaet tar ny rad ved ny `filing_date`, men FMP gir i praksis kun én versjon per periode (Q21) – ingen handling kreves i dag.
 4. **Manglende `shares_out`:** P/E/P/S/cap kan ikke regnes ved seal → kortet er ikke seal-bart (karantene-flagg).
 5. **Hull i økonomi-serie (helligdager/forsinkelse):** forward-fill siste observasjon for daglige serier; flagg hvis > N dager gammel.
-6. **Ticker-gjenbruk:** mappes til riktig `company_id` via partiell unik indeks (02 §4); delistet ticker som dukker opp igjen → nytt selskap, ny rad.
-7. **Narrativ-lekkasje som ikke fikses på N forsøk:** flagg for manuell review; selskapet droppes fra kandidatpoolen for den datoen til løst.
+6. **Ticker-gjenbruk (verifisert BBBY, Q12):** mappes til riktig `company_id` via partiell unik indeks (02 §4); kursserie trunkeres på `delisted_date` per `company_id` så to selskaper ikke blandes.
+7. **Historiske delistede mangler i `delisted-companies`:** endepunktet er rullerende (~4 mnd, Q11) → bruk `removedTicker`-loggen som survivorship-kilde (S1).
+8. **Narrativ-lekkasje som ikke fikses på N forsøk:** flagg for manuell review; selskapet droppes fra kandidatpoolen for den datoen til løst.
 
 ---
 
 ## 8. Åpne beslutninger
 
 1. **Rå-landing nå eller senere?** Anbefalt fra start (billig forsikring), men kan utsettes om MVP-tempo presser. Bekreft.
-2. **`delisting_reason`:** la stå `null` i v1; fasit-event (`acquired`/`delisted`) klassifiseres ved seal via M&A-endepunktet (`mergers-acquisitions-search`, 05 §8.6), med kurs-heuristikk (sluttkurs nær null) som fallback. Påvirker oppkjøps-håndtering i 01 §6-2.
+2. **`delisting_reason`:** la stå `null` i v1; fasit-event klassifiseres ved seal fra `historical-sp500-constituent.reason` («acquisition»/«merger» → `acquired`) + sluttkurs-nær-null → `bankruptcy`, ellers `other`. **M&A-endepunktet er verifisert ubrukbart** for dette (kun navnesøk, manglende data – Q37). Påvirker oppkjøps-håndtering i 01 §6-2.
 3. **LLM-leverandør/-modell for narrativer + dommer:** Instructions nevner OpenAI. Lås modell + at dommeren er et *separat* kall (helst annen modell/temperatur for uavhengighet). Din beslutning.
 4. **Mål-dato-liste (kandidatpool):** hvilke `decision_date`/`horizon`-kombinasjoner i MVP? Avgjør LLM-kostnad. Forslag: 2–3 datoer (f.eks. 2016, 2018, 2019) med H=5.
 5. **Alias-liste for leak-sjekk:** kilde for produkt-/merkenavn per selskap (manuell seed vs FMP/wiki-skrap)? Påvirker treffsikkerhet på trinn 1.

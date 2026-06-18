@@ -53,7 +53,7 @@ Den dyreste fellen. Bygger du universet fra *dagens* indeksliste finnes bare ove
 
 ### 3.3 Restatements (bitemporalitet i praksis)
 
-Et selskap rapporterer Q1, og *restater* det et år senere. For point-in-time vil vi ha versjonen *som var kjent på `decision_date`* – ikke den korrigerte. Derfor er nøkkelen `(company_id, period_date, period_type, filing_date)`: hver restatement er sin egen rad med sin egen `filing_date`. Spørringen i §6.2 plukker «siste versjon kjent per `decision_date`». *Forbehold:* FMP gir i praksis ofte bare én versjon per periode (as-reported eller restated, avhengig av endepunkt) – ekte restatement-historikk er en åpen post (§14). Skjemaet er klart for det selv om datakilden i v1 ikke er det.
+Et selskap rapporterer Q1, og *restater* det et år senere. For point-in-time vil vi ha versjonen *som var kjent på `decision_date`* – ikke den korrigerte. Derfor er nøkkelen `(company_id, period_date, period_type, filing_date)`: hver restatement er sin egen rad med sin egen `filing_date`. Spørringen i §6.2 plukker «siste versjon kjent per `decision_date`». *Forbehold (verifisert Q21):* FMP gir i praksis **kun én versjon per periode** (ingen restatement-historikk; testet på AAPL 40 år + GE). Ekte restatement-historikk er en åpen post (§14). Skjemaet er klart for det selv om datakilden i v1 ikke leverer det – bitemporaliteten er fremtidssikring.
 
 *Generaliserbart:* dette er lærebok-bitemporalitet (valid time × transaction time). Samme mønster gjelder enhver «hva visste vi da»-spørring – revisjon, compliance, audit trails.
 
@@ -84,7 +84,7 @@ create unique index uq_companies_active_ticker
   on companies (ticker) where is_delisted = false;
 ```
 
-**Hvorfor surrogat + partiell unik:** Når et konkursrammet selskaps ticker frigjøres og gjenbrukes (reelt fenomen), ville en global `unique(ticker)` enten blokkere ingest eller tvinge oss til å overskrive historikk. `company_id` gir stabil identitet; den partielle unike indeksen holder *aktive* tickere entydige for oppslag, mens delistede beholder sin ticker for visning uten å kollidere. `iconic`-flagget mater Curators ekskludering av de mest gjenkjennelige (Instructions §3, anonymiseringsregler).
+**Hvorfor surrogat + partiell unik:** Når et konkursrammet selskaps ticker frigjøres og gjenbrukes (reelt fenomen – **verifisert med BBBY**, hvis dividend-adjusted-serie inneholder både Bed Bath & Beyond fram til konkurs 2023 og et nytt selskap etterpå, Q12), ville en global `unique(ticker)` enten blokkere ingest eller tvinge oss til å overskrive historikk. `company_id` gir stabil identitet; den partielle unike indeksen holder *aktive* tickere entydige for oppslag, mens delistede beholder sin ticker for visning uten å kollidere. Historisk ticker-mapping bygges fra `historical-sp500-constituent.removedTicker` (03 S1), siden `symbol-change` kun dekker nylige bytter. `iconic`-flagget mater Curators ekskludering av de mest gjenkjennelige (Instructions §3, anonymiseringsregler).
 
 ```sql
 create extension if not exists btree_gist;
@@ -314,9 +314,11 @@ Kort-alpha er *brukeruavhengig* – det er bare aksjens prestasjon. Derfor: når
 ## 9. Domene F – Bruker & analytics
 
 ```sql
--- 1:1 med Supabase auth.users
+-- Kjerneschema: INGEN hard FK til Supabase (kjører også på lokal Docker-Postgres).
+-- `id` = auth.uid() (JWT sub), satt av FastAPI/Supabase. Supabase-koblingen
+-- (FK mot auth.users + signup-trigger + RLS) ligger i EGEN Supabase-only migrasjon (§10).
 create table profiles (
-  id              uuid primary key references auth.users(id) on delete cascade,
+  id              uuid primary key,            -- = auth.uid(); FK mot auth.users kun i Supabase-migrasjonen
   display_name    text,
   knowledge_level text default 'beginner'
                   check (knowledge_level in ('beginner','intermediate','expert')),
@@ -326,7 +328,7 @@ create table profiles (
 
 create table game_sessions (
   id            bigint generated always as identity primary key,
-  user_id       uuid not null references auth.users(id) on delete cascade,
+  user_id       uuid not null references profiles(id) on delete cascade,
   batch_id      bigint not null references game_batches(id),
   mode          text not null,
   is_daily      boolean not null default false,    -- denormalisert for daily-unikhet
@@ -351,7 +353,7 @@ create table decisions (
 );
 
 create table collections (                          -- Kartoteket «Min samling»
-  user_id    uuid   not null references auth.users(id) on delete cascade,
+  user_id    uuid   not null references profiles(id) on delete cascade,
   company_id bigint not null references companies(id),
   saved_at   timestamptz default now(),
   source     text check (source in ('reveal','deck','search','daily_company')),
@@ -435,6 +437,8 @@ alter table batch_cards enable row level security;   -- ingen policy bevisst
 --     macro_context/narratives/game_batches
 ```
 
+**Supabase-kobling isolert (portabilitet):** `profiles.id` har *ingen* hard FK i kjerneschemaet (§9). En **egen Supabase-only migrasjon** legger til (a) `alter table profiles add constraint profiles_auth_fk foreign key (id) references auth.users(id) on delete cascade`, (b) en signup-trigger som inserter en `profiles`-rad ved ny `auth.users`, og (c) RLS-policyene i denne seksjonen (som bruker `auth.uid()`). På lokal Docker-Postgres hoppes denne migrasjonen over: FastAPI med service-rolle eier all skriving, `profiles` seedes direkte, og `auth.uid()`-policyene er irrelevante (ingen klient-direkte tilgang offline). Hele Supabase-avhengigheten bor dermed i én migrasjonsfil; resten av schemaet er portabelt og kjører på vanlig Postgres.
+
 **Forsvar i dybden:** Selv om all spill-lesning rutes via FastAPI (anbefalt, §14), står RLS som andre lag. En enkelt feilkonfigurasjon skal ikke kunne dumpe svarene. *Prinsipp:* håndhev hemmeligheter på laveste lag som kan håndheve dem – aldri kun i presentasjonslaget.
 
 **Dagens Runde-nyanse:** Alle får samme batch; en bruker som har spilt og fått reveal kan dele svarene (iboende, som Wordle). Akseptabelt for et daglig sosialt spill. For øvings-/ranked-batcher avsløres sannhet kun etter submit, av FastAPI.
@@ -483,7 +487,7 @@ En batch kan ikke `seal`-es uten at dekningssjekken passerer. Lettvekts implemen
 ## 14. Åpne beslutninger (lås før migrasjon kjøres)
 
 1. **Surrogat- vs naturlig nøkkel:** Spec'en anbefaler `company_id` (surrogat) overalt pga. ticker-gjenbruk. Bekreft – det forplanter seg til alle FK-er.
-2. **Bitemporal dybde / restatements:** Skjemaet støtter restatement-historikk, men FMP gir trolig bare én versjon per periode i v1. Lever med as-reported i v1, eller utsett til vi har en kilde med restatement-historikk?
+2. **Bitemporal dybde / restatements:** Skjemaet støtter restatement-historikk, men FMP gir **verifisert kun én versjon per periode** (Q21). Anbefaling: lev med as-reported i v1; bitemporaliteten beholdes som fremtidssikring og aktiveres hvis en kilde med restatement-historikk tas inn.
 3. **Rut all spill-lesning via FastAPI?** Sterk anbefaling: ja (RLS som andre lag). Bekreft at klienten *aldri* leser `batch_cards`/`game_batches` direkte.
 4. **Truth-splitt nå eller v1.1?** Egen `batch_card_truth`-tabell gir mindre blast-radius. Anbefalt v1.1-herding; v1 på service-only.
 5. **Partisjonering av `prices`:** Ikke i MVP. Definer terskel (radantall / query-latency) som trigger range-partisjon.

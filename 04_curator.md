@@ -41,6 +41,7 @@ En batchperiode er et par `(decision_date, H)`:
 * **Ferdig historie:** `t1 = decision_date + H ≤ i_dag − 30 handelsdager` (02 §13(d)).
 * **Dekning finnes:** nok av universet har hullfrie serier over `[t0−2år, t1]` (03 §8).
 * **Regimebredde:** poolen skal med vilje spenne oppgang *og* nedgang/flatt (se §4 – det er slik cash blir meningsfullt).
+* **MVP – FY-forankring via eligibility (Q4-felle, 03 S3):** i stedet for å binde *batchens* `decision_date` til ett FY-vindu (umulig når fem selskaper har ulike regnskapsår og filing-lag), flyttes forankringen til en **per-selskap eligibility-test (§3.1)**: et selskap kvalifiserer kun hvis dets ferskeste point-in-time-filing ved `decision_date` *er* et årsregnskap – ingen interim rapportert siden FY. Da bruker hvert valgt kort **FY-rapporten direkte** uten TTM-summering, og 02 §6.2 forblir ærlig: vi skjuler aldri et nyere offentlig kvartal, vi *velger* bare ikke selskaper som har ett. FY = TTM trivielt. **Konsekvens:** kvalifisert pool ved en dato = selskaper i sitt post-FY/pre-neste-interim-vindu; siden mesteparten av S&P 500 har desember-regnskapsår, klynger `decision_date`-ene seg rundt feb–april. Rikelig for MVP, og nedgangsvinduer nås fortsatt (post-FY-2008 ≈ tidlig 2009). Den robuste YTD-delta-TTM-en (03 S3) trengs først i en senere fase som slakker dato-/univers-restriksjonen.
 
 ### 2.2 Narrativ-økonomi (oppdaterer 03 §7.3)
 
@@ -73,6 +74,7 @@ U(decision_date) =
   − selskaper uten leak-passert narrativ-mulighet -- (genereres lazy; men må kunne genereres)
   − selskaper med datakvalitets-/dekningsflagg    -- (03 §8)
   − selskaper uten shares_out@t0                   -- (kan ikke regne P/E/P/S/cap; 03 edge case 4)
+  − selskaper hvis ferskeste filing@decision_date IKKE er FY  -- FY-eligibility (§2.1): kun selskaper uten interim siden årsregnskapet, så kortet bruker FY direkte
 ```
 
 ### 3.2 Stratifisert-med-gulv trekning (deterministisk)
@@ -125,14 +127,14 @@ Når de 5 kortene er trukket, beregner Curator alt og forsegler. Rekkefølge:
 Per kort: kjør 02 §6.2-spørringen (siste tall med `filing_date ≤ decision_date`, riktig restatement-versjon). Henter regnskapslinjer + `shares_out`.
 
 ### 5.2 Pris-avhengige felt (her, ikke i pipeline)
-* **TTM** av EPS og revenue fra kvartaler kjent ved `decision_date` (03 S3, point-in-time TTM-avledning).
+* **Fundamentale tall (MVP): FY direkte.** For MVP forankres `decision_date` rett etter FY-`filingDate` (§2.1), så P/E-nevneren er **FY-EPS direkte** – ingen TTM-summering, og Q4-revisjonsfellen (03 S3) unngås. (Skalert drift bruker YTD-delta-TTM, 03 S3.)
 * `P/E = price(t0) / ttm_eps`. Negativ EPS ⇒ P/E vises som «neg.»/utelates (selv et signal). `P/S = price(t0) / (ttm_revenue / shares_out)`.
-* **Cap-kategori (relativ, punkt 5 låst):** ranger `mktcap_t0` (fra `price(t0)·shares_out` eller FMP `historical-market-capitalization`, 05 §8.5) innen `U(decision_date)` → topp 20 % = Large, neste 30 % = Mid, nederste 50 % = Small (config). Regime-relativt og point-in-time-ærlig; lekker ikke absolutt størrelse.
+* **Cap-kategori (inflasjonsjusterte absolutte terskler):** klassifisér `mktcap_t0` mot reelle terskler deflatert til `t0`. Velg 2026-ankre (default: Large ≥ $10 mrd, Mid $2–10 mrd, Small < $2 mrd; config) og skalér nominelt: `terskel(t0) = ankre_2026 · CPI(t0)/CPI(2026)` (CPI fra FMP `economic-indicators`, allerede ingestet – 03 S6). Kilde for `mktcap_t0`: `price(t0)·weightedAverageShsOutDil` (virker også for delistede; FMP `historical-market-capitalization` gir 0 rader for delistede – Q29, så price·shares er den robuste veien). **Kun bånd-etiketten («Large/Mid/Small») vises – aldri beløpet** – så absolutt størrelse og epoke lekker ikke, mens etiketten beholder en stabil, allmenn betydning på tvers av batcher (en «Large» i 1995 og i 2020 betyr samme *reelle* størrelse). Erstatter den tidligere batch-relative persentil-bucketen.
 * **CAGR** (3 år, revenue/EPS): prisuavhengig, kan også komme fra pipeline.
 
 ### 5.3 Fasit (truth-laget)
 Per kort fra `alpha_table`: `ret_cum, ret_ann, alpha_ann, event`.
-* **Event-deteksjon** (delisting innen `[t0,t1]`): siden `delisting_reason` er null (03 S1), klassifisér ved seal primært via FMP M&A-endepunktet (`mergers-acquisitions-search`, 05 §8.6) → `acquired` (proveny reinvestert i indeks, 01 §6-2); ellers kurs-heuristikk (sluttkurs nær null / opphør uten etterfølger) → `delisted` (`ret=−100 %`, 01 §6-1). Clue-setningen nevner hendelsen. (Åpen post §15.)
+* **Event-deteksjon** (delisting innen `[t0,t1]`): siden `delisting_reason` er null (03 S1), klassifisér ved seal fra `historical-sp500-constituent.reason`-teksten («acquisition»/«merger» → `acquired`, proveny reinvestert i indeks, 01 §6-2) + sluttkurs-nær-null → `bankruptcy` (`ret=−100 %`, 01 §6-1), ellers `other`. **M&A-endepunktet er verifisert ubrukbart** for dette (kun navnesøk, manglende data – Q37). Clue-setningen nevner hendelsen. (Åpen post §15.)
 
 ### 5.4 Frys benchmark/risikofri (determinisme, 01 §2/§6.6)
 Over `[t0, t1]`, fra `index_prices('SP500TR_SPY')` og `risk_free`:
@@ -142,7 +144,7 @@ Over `[t0, t1]`, fra `index_prices('SP500TR_SPY')` og `risk_free`:
 Per kort: hent narrativ for `(company, decision_date)` + clue/resultatforklaring for `(company, decision_date, H)`. Mangler de ⇒ generér via 03 §7 (LLM + to-trinns leak-sjekk) og cache. Seal krever `leak_check_passed=true` for alle kort. For brukerrettede forespørsler skjer generering *aldri* synkront (pool/ledetid dekker det).
 
 ### 5.6 Sett sammen & forsegl
-* **`public_payload`** (anonymisert, 02 §8): makro (fra `macro_context @ decision_date`, *delt* av alle 5 kort), fundamentals (P/E, P/S, gjeld/EK, marginer, ROIC), growth (CAGR), cap (relativ bucket), `sector_coarse`, narrativ, sektorsentiment. **Aldri navn/ticker/beløp.**
+* **`public_payload`** (anonymisert, 02 §8): makro (fra `macro_context @ decision_date`, *delt* av alle 5 kort), fundamentals (P/E, P/S, gjeld/EK, marginer, ROIC), growth (CAGR), cap (bånd, §5.2), `sector_coarse`, narrativ, sektorsentiment. **Aldri navn/ticker/beløp.**
 * **Introkort/periodekontekst** (batch-nivå, delt): markedssentiment + rentebilde for `decision_date` (Instructions §3, pkt 4).
 * **`f_*`-analytics** (02 §8): `f_pe, f_debt_to_equity, f_rev_cagr, f_sector, f_cap`.
 * **truth**: `name, alpha, ret_cum, ret_ann, event, clue, result_explanation`.
@@ -188,7 +190,7 @@ Alt fra én seedet PRNG. Snapshot fryser resultatet (prinsipp 2). `seed`, `curat
 
 Eksisterer i MVP ved siden av Dagens Runde.
 * **Pool-generering:** Curator pre-genererer en pool av sealede øvings-batcher (flytende perioder, §2), så bruker aldri venter på seal/narrativ.
-* **Per-bruker-variasjon:** server ikke samme `batch_id` to ganger til samme bruker (join mot `game_sessions`). Valgfritt: nedvekt selskaper brukeren nylig har utforsket i Kartoteket (02 kryssreferanse) for å bevare blindheten – gjelder *kun* øving (Dagens Runde er global og kan ikke per-bruker-filtreres).
+* **Per-bruker-variasjon:** server ikke samme `batch_id` to ganger til samme bruker (join mot `game_sessions`). *(Kartotek-utforskning nedvekter **ikke** kort – 07 §1.4: Kartoteket er nåtid/ekte, blindkortene historiske/anonyme, så gjenkjenning er ikke lekkasje. Dette punktet er bevisst fjernet.)*
 * Samme utvalgsalgoritme som daily, minus den globale seed-bindingen (seed = `batch_id`).
 
 ## 11. Edge cases
@@ -219,12 +221,12 @@ Gjenbruker Curator med andre beskrankninger; spec'es fullt i egen revisjon. Fors
 
 ## 14. Test & fixtures
 
-* **Determinisme:** samme seed + frosset datasnapshot ⇒ bit-identisk batch (kjør to ganger).
+* **Determinisme:** samme seed + frosset datasnapshot ⇒ bit-identisk *utvalg + beregnede numeriske felt* (kjør to ganger). Narrativ-/makrotekst er LLM-generert og fryses ved første generering (snapshot, §5.5), så determinismetesten asserterer *ikke* bit-identisk tekst – kun seleksjon, pris-avhengige felt og fasit.
 * **Frysing:** endre underliggende pris etter snapshot ⇒ batchen er uendret; ny seed-kjøring mot endret data brukes *ikke*.
 * **Gulv:** generert batch har alltid ≥1 kort `alpha≥+θ` og ≥1 `alpha≤−θ`.
 * **«Long alt» taper:** summen av long-på-alle-5 gir negativ score på en fixture-batch med taper.
 * **Cash-optimalitet:** en batch fra et nedgangsvindu (`r_m<r_f`) har minst ett kort der `c≥|α|` ⇒ cash er fasit (verifiserer punkt 3).
-* **Relativ cap:** samme selskap i en 1995- vs 2020-batch kan få ulik cap-bucket (verifiserer at terskelen er regime-relativ).
+* **Inflasjonsjustert cap:** et selskap med samme *reelle* market cap i en 1995- vs 2020-batch får **samme** cap-bånd (verifiserer at terskelen er inflasjonsjustert absolutt, ikke batch-relativ); et nominelt likt beløp kan derimot havne i ulikt bånd på tvers av epoker.
 * **Sektor-cap:** ingen sealet batch har >2 kort i samme GICS-sektor.
 * **Point-in-time:** ingen kort-payload bruker tall med `filing_date > decision_date` (binder mot 03 §9-testen).
 * Binder mot **golden fixtures (01 §3.3/§4.6)** + seed-univers (02 §15): de samme fem kortene, samme alpha, samme score.
@@ -233,7 +235,7 @@ Gjenbruker Curator med andre beskrankninger; spec'es fullt i egen revisjon. Fors
 
 *Lukket:* per-kort vs per-batch periode → **batch-nivå** (delt periode innad, variert på tvers, epoke-anonymitet på makro-boksen; §0, §5.7).
 
-1. **Event-klassifisering** (delisted vs acquired) ved seal: primært via FMP M&A-endepunkt (05 §8.6), kurs-heuristikk (nær-null) som fallback. Hvor aggressiv null-terskel? Revurder når vi ser ekte case.
+1. **Event-klassifisering** (delisted vs acquired) ved seal: fra `historical-sp500-constituent.reason` + sluttkurs-nær-null-heuristikk (M&A-endepunktet er verifisert ubrukbart, Q37). Hvor aggressiv null-terskel? Revurder når vi ser ekte case.
 2. **`θ`-adaptiv?** Fast 10 % vinner/taper-gulv, eller la `θ` flyte med periodens volatilitet (et regimejustert gulv)? Forslag: fast i MVP, adaptiv som difficulty-mekanikk senere.
 3. **Horisont-vekting:** uniform `{1,3,5}`, eller favorisér 3/5 for langsiktighets-etosen? Forslag: favorisér 3/5.
 4. **Bånd-terskler for makro** (§5.7): hvor settes grensene for inflasjon/BNP-bånd? Bør kalibreres så bånd-fordelingen er jevn nok til å ikke selv bli et fingeravtrykk.

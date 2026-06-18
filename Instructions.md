@@ -62,7 +62,7 @@ I tillegg: **Dagens Runde** – én global, synkronisert Junior-batch per dag (g
 
 ### C. Real-Time Mode (The Companion)
 
-* **Format:** Løpende portefølje basert på dagens marked, anonymisert, i samme kortformat. Mulighet for å browse kategorier og «similar companies», og redigere portefølje/vekting fortløpende. Lagt opp til langsiktige valg – skal motivere Warren Buffetter, ikke multi-screen TikTok-guruer.
+* **Format:** Løpende portefølje på nær-nåtids marked, anonymisert, i samme kortformat. Mulighet for å browse kategorier og «similar companies», og redigere portefølje/vekting fortløpende. Lagt opp til langsiktige valg – skal motivere Warren Buffetter, ikke multi-screen TikTok-guruer. *(Anonymitet på live data løses med et **etterslep på ~ett kvartal** på klokke/rapportering/nyheter + **normalisert/rebasert kursvisning** + navn først ved salg – se 08 §2–§3. Etterslepet gjør også earnings-utfall kjente → deterministisk scoring uten live-estimatfeed.)*
 * **Events:** Fokus på earnings calls. Brukeren varsles før tall slippes og predikerer over/under forventning – **med obligatorisk begrunnelses-tag** (margin / vekst / makro / verdsettelse / sentiment). Tvinger artikulering av hypotesen *og* gir gull-data: «brukere som begrunner med marginer treffer X % av tiden».
 * **Reveal:** Navn avsløres først ved salg; deretter 30 dagers karantene på samme selskap for å hindre bias-drevet kjøp/salg-looping. (Behold – smart mekanikk.)
 * **Guardrails:** Kun virtuelle penger. Tydelig «ikke investeringsråd»-disclaimer. Resultatlister mot venner er sekundært; indeksen og læring er hovedfokus.
@@ -95,7 +95,7 @@ I tillegg: **Dagens Runde** – én global, synkronisert Junior-batch per dag (g
 * **Kobling til blindmodusene (loopen som binder appen sammen):**
   1. Reveal-skjermen i Junior/Manager har «Legg til i Kartoteket»-CTA.
   2. Selskaper i samlingen viser din blindhistorikk: «Du shortet dette i en 2019-runde – det steg 212 %.» Førsteinntrykk uten bias → fasit → varig kjennskap.
-  3. Curator kan nedvekte selskaper brukeren nylig har utforsket i Kartoteket (leaderboard-integritet), eller flagge dem som «kjent» i scoringen.
+  3. **Ingen kuratorisk tilbakekobling:** å utforske et selskap i Kartoteket påvirker *ikke* hvilke blindkort du får, og flagges *ikke* i scoringen. Begrunnelse: Kartoteket er nåtid/ekte/navngitt, blindkortene er historiske/anonyme – å kjenne dagens selskap røper ikke fortidens fasit. Anonymiteten hviler på universstørrelse, ikke uvitenhet. (Forward-CTA og blindhistorikk-på-selskapssiden beholdes; kun nedvektingen utgår.)
 
 * **Hvorfor modusen styrker, ikke kannibaliserer, blindspillet:** Anonymiteten hviler på universstørrelsen (tusenvis av selskap × periode-kombinasjoner), ikke på at brukeren er uvitende. At man gjenkjenner et selskap man har studert, er læring – ikke juks. Og Kartoteket gir appen en grunn til å åpnes *mellom* spillsesjoner: spillmodusene er sesjoner, Kartoteket er innhold. Det adresserer retention-gapet og er en bredere acquisition-kanal («jeg vil lære om selskaper» er et større marked enn «jeg vil spille et finansspill»).
 
@@ -145,7 +145,7 @@ Hvert blindkort inneholder tre informasjonslag som simulerer en ekte investors b
 
 Spillet er i praksis **en backtest med UI**. Det betyr at alle klassiske backtest-feller gjelder, og hver av dem ville ikke bare gitt feil tall – de ville lært brukerne *gale lekser*:
 
-1. **Survivorship bias:** Hvis universet bygges fra *dagens* S&P 500-liste og man viser 2019-tall, finnes bare overleverne i datasettet. Da blir Long systematisk riktigere enn det var i virkeligheten, og spillet underviser i overdreven optimisme. **Løsning:** Bygg universet for beslutningsdato T fra *historiske indekskonstituenter per T* + delistede selskaper. FMP `stable` har endepunktene (`historical-sp500-constituent`, `delisted-companies`); delistede *kurser* krever Premium (verifisert via probe). Eksakt endepunktliste i 05 §7–§8.
+1. **Survivorship bias:** Hvis universet bygges fra *dagens* S&P 500-liste og man viser 2019-tall, finnes bare overleverne i datasettet. Da blir Long systematisk riktigere enn det var i virkeligheten, og spillet underviser i overdreven optimisme. **Løsning:** Bygg universet for beslutningsdato T fra *historiske indekskonstituenter per T*. Survivorship-kilden er **`historical-sp500-constituent`** (endringslogg m/ `removedTicker`, verifisert tilbake til 1957) – *ikke* `delisted-companies`, som er et rullerende ~4-mnd-vindu (verifisert). Delistede *kurser* er tilgjengelige på Premium (verifisert SIVB/FRC/BBBY). Eksakt endepunktliste i 05 §7–§8.
 2. **Look-ahead bias:** Q1 2019-regnskapet var ikke kjent 1. april 2019 – det ble rapportert uker senere. Kortet må vise *sist rapporterte tall per beslutningsdato*, keyet på **filing date**, ikke periodedato. Startkursen for avkastningsberegningen settes til første handelsdag *etter* at informasjonen på kortet var offentlig.
 3. **Totalavkastning, ikke kursavkastning:** Bruk justerte kurser (utbytte reinvestert) og en total return-indeks som benchmark. Ellers ser utbytteselskaper – selve Buffett-segmentet – systematisk dårligere ut enn de var. Det ville undergravd appens egen tese.
 4. **Splitt-/datavask:** Filtrer manglende verdier og unormale hopp som skyldes splittfeil (originalplanens punkt 10 – hører hjemme her).
@@ -190,7 +190,8 @@ Spillet er i praksis **en backtest med UI**. Det betyr at alle klassiske backtes
 
 * **Rammeverk:** Flutter (Dart). *(Åpent spørsmål: React Native/Expo ville gjenbrukt eksisterende React-kompetanse og gitt raskere MVP; Flutter gir bedre animasjons-/swipe-følelse og er et bevisst læringsvalg. Avgjør før Fase 4 – se Backlog.)*
 * **State Management:** Riverpod.
-* **Nøkkel-biblioteker:** `flutter_card_swiper`, `fl_chart`, `dio`.
+* **Nøkkel-biblioteker:** `flutter_card_swiper`, `fl_chart`, `dio`, `go_router`, `cached_network_image`, `shimmer`.
+* **Design-konvensjoner:** `flutter-ai-ui-skill` (github.com/rantlieu-blip/flutter-ai-ui-skill) brukes som UI-konvensjonskilde når frontend bygges med Claude Code — Material 3 + dark mode, tilgjengelighet (Semantics), ytelse (const/builders), komponent-blueprints. Tredjeparts-community-skill: gjennomgå før installasjon. Detaljer i 06.
 
 ---
 
