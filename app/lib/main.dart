@@ -59,7 +59,14 @@ class _HomeScreenState extends State<HomeScreen> {
     _health = _api.health();
   }
 
-  void _refresh() => setState(() => _health = _api.health());
+  void _refresh() {
+    // Kick off the request, then synchronously swap in the new future.
+    // (setState's callback must not return a value — an arrow body here would
+    // return the assignment's Future and trip a framework assertion.)
+    setState(() {
+      _health = _api.health();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

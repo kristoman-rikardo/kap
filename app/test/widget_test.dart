@@ -11,6 +11,12 @@ class _FakeApiClient extends ApiClient {
 }
 
 void main() {
+  test('ApiClient applies the dev base URL', () {
+    // Guards the constructor wiring: a regression here is why the app once
+    // connected to a random port instead of :8000.
+    expect(ApiClient().baseUrl, 'http://127.0.0.1:8000');
+  });
+
   testWidgets('shows the KAP title and the API status', (
     WidgetTester tester,
   ) async {

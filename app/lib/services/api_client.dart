@@ -7,7 +7,7 @@ import 'package:dio/dio.dart';
 /// built later per 05 §5.
 class ApiClient {
   ApiClient({Dio? dio, String baseUrl = defaultBaseUrl})
-    : _dio = (dio ?? Dio())..options.baseUrl = baseUrl;
+    : _dio = dio ?? Dio(BaseOptions(baseUrl: baseUrl));
 
   /// Dev default. The iOS simulator and the macOS desktop build both reach the
   /// host machine at `127.0.0.1`. An Android emulator would use `10.0.2.2`, and
@@ -15,6 +15,9 @@ class ApiClient {
   static const String defaultBaseUrl = 'http://127.0.0.1:8000';
 
   final Dio _dio;
+
+  /// The base URL all requests resolve against (exposed for sanity tests).
+  String get baseUrl => _dio.options.baseUrl;
 
   /// Calls `GET /health` and returns the `status` field (e.g. "ok").
   Future<String> health() async {
