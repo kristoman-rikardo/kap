@@ -8,9 +8,10 @@ import '../widgets/game_card_view.dart';
 
 /// Dagens runde — CP 1.2 (choice capture).
 ///
-/// Loads the (fake) daily batch and lets you choose per card by swipe
-/// (left = Short, right = Long, up = Cash) or by the Short / Cash / Long button
-/// row. Choices are collected; submit + reveal land next. Real scoring in CP 1.3.
+/// Loads the (fake) daily batch and lets you choose per card: swipe left =
+/// Short, right = Long, and Cash via the button (vertical is reserved for
+/// scrolling the card). The Short / Cash / Long button row mirrors this.
+/// Choices are collected; submit + reveal land next. Real scoring in CP 1.3.
 class DailyScreen extends StatefulWidget {
   const DailyScreen({super.key, this.apiClient});
 
@@ -29,6 +30,7 @@ class _DailyScreenState extends State<DailyScreen> {
   final Map<int, Choice> _choices = {}; // card_no -> choice
   int _swiped = 0;
   bool _done = false;
+  Choice? _pendingChoice; // set by the Cash button so its swipe records Cash
 
   @override
   void dispose() {
@@ -53,7 +55,8 @@ class _DailyScreenState extends State<DailyScreen> {
   };
 
   bool _onSwipe(DailyBatch batch, int previousIndex, CardSwiperDirection dir) {
-    final choice = _choiceFor(dir);
+    final choice = _pendingChoice ?? _choiceFor(dir);
+    _pendingChoice = null;
     if (choice == null) return false; // ignore directions we don't use
     setState(() {
       _choices[batch.cards[previousIndex].cardNo] = choice;
@@ -109,7 +112,6 @@ class _DailyScreenState extends State<DailyScreen> {
                   allowedSwipeDirection: const AllowedSwipeDirection.only(
                     left: true,
                     right: true,
-                    up: true,
                   ),
                   padding: const EdgeInsets.all(16),
                   onSwipe: (previousIndex, currentIndex, direction) =>
@@ -122,7 +124,10 @@ class _DailyScreenState extends State<DailyScreen> {
         if (!_done)
           _ChoiceBar(
             onShort: () => _controller.swipe(CardSwiperDirection.left),
-            onCash: () => _controller.swipe(CardSwiperDirection.top),
+            onCash: () {
+              _pendingChoice = Choice.cash;
+              _controller.swipe(CardSwiperDirection.right);
+            },
             onLong: () => _controller.swipe(CardSwiperDirection.right),
           ),
       ],

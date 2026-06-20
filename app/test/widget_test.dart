@@ -88,8 +88,19 @@ void main() {
   testWidgets('GameCardView renders sector, narrative, "neg." P/E and cap', (
     WidgetTester tester,
   ) async {
+    // Render at a real phone-card envelope so a layout overflow fails the test.
     await tester.pumpWidget(
-      const MaterialApp(home: Scaffold(body: GameCardView(card: _sampleCard))),
+      const MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 360,
+              height: 560,
+              child: GameCardView(card: _sampleCard),
+            ),
+          ),
+        ),
+      ),
     );
 
     expect(find.text('Forbruksvarer'), findsOneWidget);

@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../models/game_card.dart';
 
-/// Renders one anonymized blind card — the three layers from Instructions §3:
-/// banded macro, hard numbers, narrative. CP 1.1 rendering; term-chips,
-/// knowledge-level definitions and final polish come later (06 §8).
+/// Renders one anonymized blind card — the three layers from Instructions §3,
+/// as labelled zones for readability: MARKED (banded macro context),
+/// NØKKELTALL (the hard numbers, grouped by theme), SITUASJON (narrative).
+///
+/// The body scrolls vertically so the full card fits any screen size without
+/// overflow (the card swiper only claims horizontal drags). Term-chips,
+/// knowledge-level definitions and motion come later (06 §8).
 class GameCardView extends StatelessWidget {
   const GameCardView({super.key, required this.card});
 
@@ -14,41 +18,67 @@ class GameCardView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final p = card.payload;
-    final f = p.fundamentals;
 
     return Card(
       elevation: 2,
       clipBehavior: Clip.antiAlias,
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: Text(
                     p.sectorCoarse,
-                    style: theme.textTheme.titleLarge,
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
+                const SizedBox(width: 12),
                 _CapChip(cap: p.cap),
               ],
             ),
-            const SizedBox(height: 16),
-            _MacroBoxView(macro: p.macro),
-            const SizedBox(height: 16),
-            _FundamentalsGrid(fundamentals: f, growth: p.growth),
-            const SizedBox(height: 16),
-            Flexible(
-              child: Text(
-                p.narrative,
-                style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
-                overflow: TextOverflow.fade,
-              ),
+            const SizedBox(height: 18),
+            const _SectionLabel('Marked'),
+            const SizedBox(height: 10),
+            _MacroGrid(macro: p.macro),
+            const SizedBox(height: 22),
+            const _SectionLabel('Nøkkeltall'),
+            const SizedBox(height: 12),
+            _MetricsGrid(fundamentals: p.fundamentals, growth: p.growth),
+            const SizedBox(height: 22),
+            const _SectionLabel('Situasjon'),
+            const SizedBox(height: 8),
+            Text(
+              p.narrative,
+              style: theme.textTheme.bodyLarge?.copyWith(height: 1.45),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Text(
+      text.toUpperCase(),
+      style: theme.textTheme.labelMedium?.copyWith(
+        color: theme.colorScheme.primary,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 1.1,
       ),
     );
   }
@@ -59,20 +89,24 @@ class _CapChip extends StatelessWidget {
 
   final String cap;
 
-  static const _labels = {'small': 'Small cap', 'mid': 'Mid cap', 'large': 'Large cap'};
+  static const _labels = {
+    'small': 'Small cap',
+    'mid': 'Mid cap',
+    'large': 'Large cap',
+  };
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: theme.colorScheme.secondaryContainer,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         _labels[cap] ?? cap,
-        style: theme.textTheme.labelMedium?.copyWith(
+        style: theme.textTheme.labelLarge?.copyWith(
           color: theme.colorScheme.onSecondaryContainer,
         ),
       ),
@@ -80,8 +114,9 @@ class _CapChip extends StatelessWidget {
   }
 }
 
-class _MacroBoxView extends StatelessWidget {
-  const _MacroBoxView({required this.macro});
+/// 2×2 of label-over-value macro cells inside a soft container.
+class _MacroGrid extends StatelessWidget {
+  const _MacroGrid({required this.macro});
 
   final MacroBox macro;
 
@@ -90,47 +125,45 @@ class _MacroBoxView extends StatelessWidget {
     final theme = Theme.of(context);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
       ),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      child: Column(
         children: [
-          _InfoChip(label: 'Renter', value: '${macro.rateLevel}, ${macro.rateDirection}'),
-          _InfoChip(label: 'Inflasjon', value: macro.inflationBand),
-          _InfoChip(label: 'BNP', value: macro.gdpBand),
-          _InfoChip(label: 'Sektorsentiment', value: macro.sectorSentiment),
+          Row(
+            children: [
+              Expanded(
+                child: _Cell(
+                  label: 'Renter',
+                  value: '${macro.rateLevel}, ${macro.rateDirection}',
+                ),
+              ),
+              Expanded(
+                child: _Cell(label: 'Inflasjon', value: macro.inflationBand),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(child: _Cell(label: 'BNP', value: macro.gdpBand)),
+              Expanded(
+                child: _Cell(label: 'Sektor', value: macro.sectorSentiment),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _InfoChip extends StatelessWidget {
-  const _InfoChip({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(label.toUpperCase(), style: theme.textTheme.labelSmall),
-        Text(value, style: theme.textTheme.bodyMedium),
-      ],
-    );
-  }
-}
-
-class _FundamentalsGrid extends StatelessWidget {
-  const _FundamentalsGrid({required this.fundamentals, required this.growth});
+/// The nine fundamentals as thematic rows:
+/// valuation + leverage / margins / returns + growth.
+class _MetricsGrid extends StatelessWidget {
+  const _MetricsGrid({required this.fundamentals, required this.growth});
 
   final Fundamentals fundamentals;
   final Growth growth;
@@ -141,32 +174,34 @@ class _FundamentalsGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final f = fundamentals;
-    final metrics = <(String, String)>[
-      ('P/E', f.pe == null ? 'neg.' : f.pe!.toStringAsFixed(1)),
-      ('P/S', _mult(f.ps)),
-      ('Gjeld/EK', _mult(f.debtToEquity)),
-      ('Bruttomargin', _pct(f.grossMargin)),
-      ('Driftsmargin', _pct(f.operatingMargin)),
-      ('Nettomargin', _pct(f.netMargin)),
-      ('ROIC', _pct(f.roic)),
-      ('Omsetn.vekst', _pct(growth.revCagr3y)),
-      ('EPS-vekst', _pct(growth.epsCagr3y)),
+    final rows = <List<(String, String)>>[
+      [
+        ('P/E', f.pe == null ? 'neg.' : f.pe!.toStringAsFixed(1)),
+        ('P/S', _mult(f.ps)),
+        ('Gjeld/EK', _mult(f.debtToEquity)),
+      ],
+      [
+        ('Bruttomargin', _pct(f.grossMargin)),
+        ('Driftsmargin', _pct(f.operatingMargin)),
+        ('Nettomargin', _pct(f.netMargin)),
+      ],
+      [
+        ('ROIC', _pct(f.roic)),
+        ('Omsetn.vekst', _pct(growth.revCagr3y)),
+        ('EPS-vekst', _pct(growth.epsCagr3y)),
+      ],
     ];
 
     return Column(
       children: [
-        for (var row = 0; row < metrics.length; row += 3)
+        for (var i = 0; i < rows.length; i++)
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: EdgeInsets.only(bottom: i == rows.length - 1 ? 0 : 14),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (var col = 0; col < 3 && row + col < metrics.length; col++)
-                  Expanded(
-                    child: _Metric(
-                      label: metrics[row + col].$1,
-                      value: metrics[row + col].$2,
-                    ),
-                  ),
+                for (final (label, value) in rows[i])
+                  Expanded(child: _Cell(label: label, value: value)),
               ],
             ),
           ),
@@ -175,8 +210,9 @@ class _FundamentalsGrid extends StatelessWidget {
   }
 }
 
-class _Metric extends StatelessWidget {
-  const _Metric({required this.label, required this.value});
+/// A muted label over a prominent value — the basic readable unit.
+class _Cell extends StatelessWidget {
+  const _Cell({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -187,11 +223,22 @@ class _Metric extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: theme.textTheme.labelSmall),
-        const SizedBox(height: 2),
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 3),
         Text(
           value,
-          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ],
     );

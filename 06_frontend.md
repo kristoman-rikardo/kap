@@ -156,8 +156,8 @@ Tre lag (Instructions §3), fargekodet og rolig:
 
 ## 9. Swipe-mekanikk
 
-* `flutter_card_swiper`: **høyre = Long, venstre = Short, opp = Cash/skip**. Overlay-etikett vises under draget («LONG»/«SHORT»/«CASH»).
-* **Knapperad som speiler sveipene (Short / Cash / Long):** i tillegg til sveiping vises en nøytral knapperad (Cash mest fremtredende), siden opp-sveip for Cash er en klønete bevegelse. Knappene utløser nøyaktig samme valg via `CardSwiperController` og går gjennom samme `onSwipe`-håndtering som sveipene – muskelminnet bevares, men betjeningen blir lett tilgjengelig. Fargenøytral under blind spilling – ingen rød/grønn (§1/§14).
+* `flutter_card_swiper`: **høyre = Long, venstre = Short** via sveip. **Cash velges med knapp**, ikke opp-sveip: den vertikale aksen er reservert for å *scrolle* det tallrike kortet (som kan være høyere enn skjermen på mindre enheter). Overlay-etikett under draget («LONG»/«SHORT»).
+* **Nøytral knapperad (Short / Cash / Long, Cash mest fremtredende):** lett tilgjengelig betjening ved siden av sveipene. Knappene går gjennom samme `onSwipe`-håndtering; Cash-knappen setter en `_pendingChoice` som `onSwipe` leser, så kortet animeres ut horisontalt men registreres som Cash. Fargenøytral under blind spilling – ingen rød/grønn (§1/§14).
 * Haptisk feedback + lyd ved valg (whoosh) – tilfredsstillende, men ikke kasino. Reward-lydene kan være tydeligere i reveal/streak enn under selve seleksjonen (jf. §1).
 * Teller «n/5» synlig. Manager-vekting skjer *ikke* per swipe (det er en egen bekreftelses-skjerm, 04 §12 / 01 §2B) – Junior er ren sveiping.
 
