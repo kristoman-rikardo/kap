@@ -1,0 +1,10 @@
+# json_serializable config: map Dart camelCase <-> API snake_case globally.
+# The two *_cagr_3y fields still need an explicit @JsonKey, because snake-casing
+# a name that ends in a digit (revCagr3y) drops the underscore before it.
+targets:
+  $default:
+    builders:
+      json_serializable:
+        options:
+          field_rename: snake
+          explicit_to_json: true

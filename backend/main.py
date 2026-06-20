@@ -8,6 +8,9 @@ are specced in 05_api.md and arrive in later phases.
 
 from fastapi import FastAPI
 
+from backend.fake_data import fake_daily_batch
+from backend.schemas import DailyBatch
+
 app = FastAPI(title="KAP API", version="0.1.0")
 
 
@@ -15,3 +18,13 @@ app = FastAPI(title="KAP API", version="0.1.0")
 def health() -> dict[str, str]:
     """Liveness probe — returns 200 with a small JSON body."""
     return {"status": "ok"}
+
+
+@app.get("/v1/daily", response_model=DailyBatch)
+def daily() -> DailyBatch:
+    """CP 1.1: a hardcoded anonymized daily batch (5 cards).
+
+    Replaced by the real Curator/DB-backed sealed batch in Fase 2/3. Never
+    returns name / ticker / decision_date (the anonymization boundary, 05 §5).
+    """
+    return fake_daily_batch()

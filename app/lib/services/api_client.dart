@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
 
+import '../models/daily_batch.dart';
+
 /// Thin HTTP client for the KAP backend.
 ///
 /// CP 0.4: just enough to prove the app reaches the API end-to-end. The full
@@ -23,5 +25,11 @@ class ApiClient {
   Future<String> health() async {
     final response = await _dio.get<Map<String, dynamic>>('/health');
     return response.data?['status'] as String? ?? 'unknown';
+  }
+
+  /// Fetches today's anonymized daily round (05 §4.1).
+  Future<DailyBatch> getDaily() async {
+    final response = await _dio.get<Map<String, dynamic>>('/v1/daily');
+    return DailyBatch.fromJson(response.data!);
   }
 }
