@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_card_swiper/flutter_card_swiper.dart';
 
+import '../models/choice.dart';
 import '../models/daily_batch.dart';
 import '../services/api_client.dart';
 import '../widgets/game_card_view.dart';
 
-/// Dagens runde — CP 1.1.
+/// Dagens runde — CP 1.2 (choice capture).
 ///
-/// Loads the (fake) daily batch and lets you swipe through the 5 anonymized
-/// cards. Choice capture (long/short/cash) and submit/reveal come in CP 1.2;
-/// real scoring in CP 1.3. Swiping is horizontal-only for now so it can't be
-/// confused with the up=cash gesture we add later.
+/// Loads the (fake) daily batch and lets you choose per card by swipe
+/// (left = Short, right = Long, up = Cash) or by the Short / Cash / Long button
+/// row. Choices are collected; submit + reveal land next. Real scoring in CP 1.3.
 class DailyScreen extends StatefulWidget {
   const DailyScreen({super.key, this.apiClient});
 
@@ -23,17 +23,43 @@ class DailyScreen extends StatefulWidget {
 
 class _DailyScreenState extends State<DailyScreen> {
   late final ApiClient _api = widget.apiClient ?? ApiClient();
-  late Future<DailyBatch> _future = _api.getDaily();
+  final CardSwiperController _controller = CardSwiperController();
 
+  late Future<DailyBatch> _future = _api.getDaily();
+  final Map<int, Choice> _choices = {}; // card_no -> choice
   int _swiped = 0;
   bool _done = false;
 
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
   void _reload() {
     setState(() {
+      _choices.clear();
       _swiped = 0;
       _done = false;
       _future = _api.getDaily();
     });
+  }
+
+  Choice? _choiceFor(CardSwiperDirection direction) => switch (direction) {
+    CardSwiperDirection.right => Choice.long,
+    CardSwiperDirection.left => Choice.short,
+    CardSwiperDirection.top => Choice.cash,
+    _ => null,
+  };
+
+  bool _onSwipe(DailyBatch batch, int previousIndex, CardSwiperDirection dir) {
+    final choice = _choiceFor(dir);
+    if (choice == null) return false; // ignore directions we don't use
+    setState(() {
+      _choices[batch.cards[previousIndex].cardNo] = choice;
+      _swiped = previousIndex + 1;
+    });
+    return true;
   }
 
   @override
@@ -74,26 +100,80 @@ class _DailyScreenState extends State<DailyScreen> {
         ),
         Expanded(
           child: _done
-              ? _DoneView(total: total, onReplay: _reload)
+              ? _DoneView(choices: _choices, onReplay: _reload)
               : CardSwiper(
+                  controller: _controller,
                   cardsCount: total,
                   numberOfCardsDisplayed: total >= 2 ? 2 : 1,
                   isLoop: false,
-                  allowedSwipeDirection: const AllowedSwipeDirection.symmetric(
-                    horizontal: true,
-                    vertical: false,
+                  allowedSwipeDirection: const AllowedSwipeDirection.only(
+                    left: true,
+                    right: true,
+                    up: true,
                   ),
                   padding: const EdgeInsets.all(16),
-                  onSwipe: (previousIndex, currentIndex, direction) {
-                    setState(() => _swiped = previousIndex + 1);
-                    return true;
-                  },
+                  onSwipe: (previousIndex, currentIndex, direction) =>
+                      _onSwipe(batch, previousIndex, direction),
                   onEnd: () => setState(() => _done = true),
                   cardBuilder: (context, index, _, _) =>
                       GameCardView(card: batch.cards[index]),
                 ),
         ),
+        if (!_done)
+          _ChoiceBar(
+            onShort: () => _controller.swipe(CardSwiperDirection.left),
+            onCash: () => _controller.swipe(CardSwiperDirection.top),
+            onLong: () => _controller.swipe(CardSwiperDirection.right),
+          ),
       ],
+    );
+  }
+}
+
+/// Short / Cash / Long action row. Neutral styling — colour is reserved for the
+/// reveal (06 §1/§14), so nothing here implies an outcome during blind play.
+class _ChoiceBar extends StatelessWidget {
+  const _ChoiceBar({
+    required this.onShort,
+    required this.onCash,
+    required this.onLong,
+  });
+
+  final VoidCallback onShort;
+  final VoidCallback onCash;
+  final VoidCallback onLong;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: onShort,
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Short'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: FilledButton.icon(
+              onPressed: onCash,
+              icon: const Icon(Icons.arrow_upward),
+              label: const Text('Cash'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: onLong,
+              icon: const Icon(Icons.arrow_forward),
+              label: const Text('Long'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -137,10 +217,12 @@ class _IntroBanner extends StatelessWidget {
 }
 
 class _DoneView extends StatelessWidget {
-  const _DoneView({required this.total, required this.onReplay});
+  const _DoneView({required this.choices, required this.onReplay});
 
-  final int total;
+  final Map<int, Choice> choices;
   final VoidCallback onReplay;
+
+  int _count(Choice c) => choices.values.where((v) => v == c).length;
 
   @override
   Widget build(BuildContext context) {
@@ -151,11 +233,21 @@ class _DoneView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Du har sett alle $total kortene',
-                style: theme.textTheme.titleLarge, textAlign: TextAlign.center),
+            Text(
+              'Valgene dine',
+              style: theme.textTheme.titleLarge,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Long: ${_count(Choice.long)}   ·   '
+              'Short: ${_count(Choice.short)}   ·   '
+              'Cash: ${_count(Choice.cash)}',
+              style: theme.textTheme.titleMedium,
+            ),
             const SizedBox(height: 8),
             Text(
-              'Valg, innsending og scoring kommer i neste steg.',
+              'Innsending og scoring kommer i neste steg.',
               style: theme.textTheme.bodyMedium,
               textAlign: TextAlign.center,
             ),
@@ -183,11 +275,16 @@ class _ErrorView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Kunne ikke hente dagens runde',
-                style: theme.textTheme.titleMedium),
+            Text(
+              'Kunne ikke hente dagens runde',
+              style: theme.textTheme.titleMedium,
+            ),
             const SizedBox(height: 8),
-            Text('$error',
-                style: theme.textTheme.bodySmall, textAlign: TextAlign.center),
+            Text(
+              '$error',
+              style: theme.textTheme.bodySmall,
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 16),
             FilledButton(onPressed: onRetry, child: const Text('Prøv igjen')),
           ],
