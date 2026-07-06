@@ -215,18 +215,18 @@ void main() {
     // Let the staggered flips run to completion so face-up content exists.
     await tester.pumpAndSettle(const Duration(seconds: 3));
 
-    expect(find.text('−28'), findsOneWidget); // score header
+    // Chart-first: the alpha headline and the you-vs-index chart lead.
+    expect(find.textContaining('/år'), findsWidgets);
+    expect(find.text('Deg mot indeksen'), findsOneWidget);
+    // The game score is a compact strip, not the headline.
+    expect(find.textContaining('−28 poeng'), findsOneWidget);
     expect(find.textContaining('Corex Systems'), findsOneWidget);
     expect(find.text('Du valgte Long'), findsOneWidget);
+    // Each card carries its own fasit; a matching call gets the check mark.
+    expect(find.text('Fasit: Long ✓'), findsOneWidget);
+    expect(find.text('Fasit: Short'), findsOneWidget);
     // Cash on a falling stock earns the avoided-loss marker (01 §3.2).
     expect(find.text('✓ Unngått tap'), findsOneWidget);
-    // The fasit section sits below the fold of the lazy ListView.
-    await tester.scrollUntilVisible(
-      find.text('Fasit (etterpåklokskap)'),
-      200,
-      scrollable: find.byType(Scrollable),
-    );
-    expect(find.text('Fasit (etterpåklokskap)'), findsOneWidget);
   });
 
   testWidgets('full loop: choose on every card, auto-submit, see the reveal', (
@@ -249,9 +249,10 @@ void main() {
       (2, Choice.short),
     ]);
 
-    // ... and the reveal took over the screen.
+    // ... and the reveal took over the screen, chart first.
     await tester.pumpAndSettle(const Duration(seconds: 3));
-    expect(find.text('−28'), findsOneWidget);
+    expect(find.text('Deg mot indeksen'), findsOneWidget);
+    expect(find.textContaining('−28 poeng'), findsOneWidget);
     expect(find.textContaining('Corex Systems'), findsOneWidget);
   });
 

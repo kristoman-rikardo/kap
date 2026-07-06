@@ -4,6 +4,7 @@ import 'package:flutter_card_swiper/flutter_card_swiper.dart';
 import '../models/choice.dart';
 import '../models/daily_batch.dart';
 import '../models/decision.dart';
+import '../models/game_card.dart';
 import '../models/reveal.dart';
 import '../services/api_client.dart';
 import '../widgets/game_card_view.dart';
@@ -129,7 +130,12 @@ class _DailyScreenState extends State<DailyScreen> {
     final total = batch.cards.length;
     return Column(
       children: [
-        _IntroBanner(intro: batch.intro),
+        // The macro regime is batch-shared (04 §5.6) — presented fully here,
+        // once, so the cards can carry only a slim reminder strip.
+        _IntroBanner(
+          intro: batch.intro,
+          macro: batch.cards.first.payload.macro,
+        ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Align(
@@ -236,13 +242,15 @@ class _ChoiceBar extends StatelessWidget {
 }
 
 class _IntroBanner extends StatelessWidget {
-  const _IntroBanner({required this.intro});
+  const _IntroBanner({required this.intro, required this.macro});
 
   final Intro intro;
+  final MacroBox macro; // batch-shared regime (04 §5.6)
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final onColor = theme.colorScheme.onPrimaryContainer;
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -256,19 +264,58 @@ class _IntroBanner extends StatelessWidget {
         children: [
           Text(
             'Marked: ${intro.marketSentiment} · ${intro.ratePicture}',
-            style: theme.textTheme.titleSmall?.copyWith(
-              color: theme.colorScheme.onPrimaryContainer,
-            ),
+            style: theme.textTheme.titleSmall?.copyWith(color: onColor),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 14,
+            runSpacing: 4,
+            children: [
+              _RegimeFact(
+                icon: rateDirectionIcon(macro.rateDirection),
+                text: '${macro.rateLevel}, ${macro.rateDirection} rente',
+              ),
+              _RegimeFact(
+                icon: Icons.local_fire_department_outlined,
+                text: 'inflasjon ${macro.inflationBand}',
+              ),
+              _RegimeFact(
+                icon: Icons.show_chart,
+                text: 'BNP ${macro.gdpBand}',
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           Text(
             intro.note,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onPrimaryContainer,
-            ),
+            style: theme.textTheme.bodySmall?.copyWith(color: onColor),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _RegimeFact extends StatelessWidget {
+  const _RegimeFact({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final onColor = theme.colorScheme.onPrimaryContainer;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 15, color: onColor),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          style: theme.textTheme.labelMedium?.copyWith(color: onColor),
+        ),
+      ],
     );
   }
 }

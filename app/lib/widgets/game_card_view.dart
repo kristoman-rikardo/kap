@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../models/game_card.dart';
 
-/// Renders one anonymized blind card — the three layers from Instructions §3,
-/// as labelled zones for readability: MARKED (banded macro context),
-/// NØKKELTALL (the hard numbers, grouped by theme), SITUASJON (narrative).
+/// Renders one anonymized blind card — the three layers from Instructions §3.
+///
+/// The shared batch regime lives in the intro banner (one macro picture per
+/// batch, 04 §5.6), so the card itself only carries a slim, expandable macro
+/// strip — icon chips that unfold to the full grid on tap. That frees the
+/// vertical space for what varies per card: NØKKELTALL and SITUASJON.
 ///
 /// The body scrolls vertically so the full card fits any screen size without
 /// overflow (the card swiper only claims horizontal drags). Term-chips,
@@ -43,15 +46,13 @@ class GameCardView extends StatelessWidget {
                 _CapChip(cap: p.cap),
               ],
             ),
-            const SizedBox(height: 18),
-            const _SectionLabel('Marked'),
-            const SizedBox(height: 10),
-            _MacroGrid(macro: p.macro),
-            const SizedBox(height: 22),
+            const SizedBox(height: 12),
+            MacroStrip(macro: p.macro),
+            const SizedBox(height: 20),
             const _SectionLabel('Nøkkeltall'),
             const SizedBox(height: 12),
             _MetricsGrid(fundamentals: p.fundamentals, growth: p.growth),
-            const SizedBox(height: 22),
+            const SizedBox(height: 20),
             const _SectionLabel('Situasjon'),
             const SizedBox(height: 8),
             Text(
@@ -61,6 +62,119 @@ class GameCardView extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Icons shared by the macro strip and the intro banner.
+IconData rateDirectionIcon(String direction) => switch (direction) {
+  'stigende' => Icons.north_east,
+  'fallende' => Icons.south_east,
+  _ => Icons.east,
+};
+
+IconData sentimentIcon(String sentiment) => switch (sentiment) {
+  'optimistisk' => Icons.sentiment_satisfied,
+  'pessimistisk' => Icons.sentiment_dissatisfied,
+  _ => Icons.sentiment_neutral,
+};
+
+/// Slim one-line macro summary; tap unfolds the detailed 2×2 grid. The regime
+/// is batch-shared and already presented in the intro — this is a reminder,
+/// not the primary display, so it defaults to collapsed.
+class MacroStrip extends StatefulWidget {
+  const MacroStrip({super.key, required this.macro});
+
+  final MacroBox macro;
+
+  @override
+  State<MacroStrip> createState() => _MacroStripState();
+}
+
+class _MacroStripState extends State<MacroStrip> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final m = widget.macro;
+    return Material(
+      color: theme.colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => setState(() => _expanded = !_expanded),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            alignment: Alignment.topCenter,
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Wrap(
+                        spacing: 10,
+                        runSpacing: 6,
+                        children: [
+                          _MacroChip(
+                            icon: rateDirectionIcon(m.rateDirection),
+                            text: '${m.rateLevel} rente',
+                          ),
+                          _MacroChip(
+                            icon: Icons.local_fire_department_outlined,
+                            text: 'infl. ${m.inflationBand}',
+                          ),
+                          _MacroChip(
+                            icon: sentimentIcon(m.sectorSentiment),
+                            text: 'sektor ${m.sectorSentiment}',
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      _expanded ? Icons.expand_less : Icons.expand_more,
+                      size: 20,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ],
+                ),
+                if (_expanded) ...[
+                  const SizedBox(height: 12),
+                  _MacroGrid(macro: m),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MacroChip extends StatelessWidget {
+  const _MacroChip({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: theme.colorScheme.onSurfaceVariant),
+        const SizedBox(width: 4),
+        Text(
+          text,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -114,7 +228,8 @@ class _CapChip extends StatelessWidget {
   }
 }
 
-/// 2×2 of label-over-value macro cells inside a soft container.
+/// 2×2 of label-over-value macro cells — the expanded state of [MacroStrip],
+/// which provides the surrounding chrome.
 class _MacroGrid extends StatelessWidget {
   const _MacroGrid({required this.macro});
 
@@ -122,40 +237,31 @@ class _MacroGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: _Cell(
-                  label: 'Renter',
-                  value: '${macro.rateLevel}, ${macro.rateDirection}',
-                ),
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _Cell(
+                label: 'Renter',
+                value: '${macro.rateLevel}, ${macro.rateDirection}',
               ),
-              Expanded(
-                child: _Cell(label: 'Inflasjon', value: macro.inflationBand),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(child: _Cell(label: 'BNP', value: macro.gdpBand)),
-              Expanded(
-                child: _Cell(label: 'Sektor', value: macro.sectorSentiment),
-              ),
-            ],
-          ),
-        ],
-      ),
+            ),
+            Expanded(
+              child: _Cell(label: 'Inflasjon', value: macro.inflationBand),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(child: _Cell(label: 'BNP', value: macro.gdpBand)),
+            Expanded(
+              child: _Cell(label: 'Sektor', value: macro.sectorSentiment),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
