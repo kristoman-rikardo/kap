@@ -1,8 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'config.dart';
 import 'screens/daily_screen.dart';
 
-void main() => runApp(const KapApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Supabase.initialize(
+    url: kSupabaseUrl,
+    publishableKey: kSupabasePublishableKey,
+  );
+  // Anonym først (05 §3): ingen registrering for å spille. Sesjonen
+  // persisteres av supabase_flutter, så user_id/streak overlever restart.
+  final auth = Supabase.instance.client.auth;
+  if (auth.currentSession == null) {
+    try {
+      await auth.signInAnonymously();
+    } catch (_) {
+      // Offline første gang: appen åpner likevel; API-kall gir feilskjerm
+      // med retry, og interceptoren prøver ny innlogging ved neste kall.
+    }
+  }
+  runApp(const KapApp());
+}
 
 /// Root of the KAP app.
 ///
