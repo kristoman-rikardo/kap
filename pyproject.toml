@@ -13,3 +13,8 @@ dependencies = [
 #   uv add X    -> add a new dependency (updates this file + uv.lock)
 #   uv run X.py -> run inside the project env without activating anything
 [tool.uv]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
