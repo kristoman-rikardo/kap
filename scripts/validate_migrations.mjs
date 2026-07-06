@@ -6,7 +6,7 @@
 // Run:  cd scripts && npm install @electric-sql/pglite && node validate_migrations.mjs
 import { PGlite } from '@electric-sql/pglite';
 import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 const MIGRATIONS = new URL('../supabase/migrations', import.meta.url).pathname;
 const db = new PGlite({ extensions: { btree_gist } });
@@ -20,10 +20,10 @@ await db.exec(`
     $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 `);
 
-await db.exec(readFileSync(`${MIGRATIONS}/20260706120000_core_schema.sql`, 'utf8'));
-console.log('✓ core schema applied');
-await db.exec(readFileSync(`${MIGRATIONS}/20260706120100_supabase_auth_rls.sql`, 'utf8'));
-console.log('✓ supabase auth/RLS migration applied');
+for (const file of readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).sort()) {
+  await db.exec(readFileSync(`${MIGRATIONS}/${file}`, 'utf8'));
+  console.log(`✓ applied ${file}`);
+}
 
 const tables = await db.query(`
   select table_name from information_schema.tables
