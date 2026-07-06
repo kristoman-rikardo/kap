@@ -21,10 +21,32 @@ GOLDEN_CHOICES = {
 }
 
 
-def test_daily_never_leaks_truth():
+def test_daily_requires_auth():
+    response = client.get("/v1/daily")
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "INVALID_TOKEN"
+
+
+def test_submit_requires_auth():
+    response = client.post("/v1/batches/1/submit", json=GOLDEN_CHOICES)
+    assert response.status_code == 401
+
+
+def test_daily_rejects_garbage_token():
+    response = client.get(
+        "/v1/daily", headers={"Authorization": "Bearer not.a.jwt"}
+    )
+    assert response.status_code == 401
+
+
+def test_health_stays_open():
+    assert client.get("/health").status_code == 200
+
+
+def test_daily_never_leaks_truth(auth_headers):
     """The GET side must carry no identity or era (05 §5). String-level check
     so a future field rename can't smuggle truth past a key-name test."""
-    response = client.get("/v1/daily")
+    response = client.get("/v1/daily", headers=auth_headers)
     assert response.status_code == 200
     body = response.text.lower()
     for leak in ("ticker", '"name"', "corex", "meridian", "halvex",
@@ -33,9 +55,11 @@ def test_daily_never_leaks_truth():
     assert len(response.json()["cards"]) == 5
 
 
-def test_submit_scores_the_golden_round():
+def test_submit_scores_the_golden_round(auth_headers):
     """The fake batch *is* the 01 §3.3 fixture — submit must reproduce it."""
-    response = client.post("/v1/batches/1/submit", json=GOLDEN_CHOICES)
+    response = client.post(
+        "/v1/batches/1/submit", json=GOLDEN_CHOICES, headers=auth_headers
+    )
     assert response.status_code == 200
     reveal = response.json()
 
@@ -53,20 +77,23 @@ def test_submit_scores_the_golden_round():
     assert reveal["ideal"]["score"] > 100
 
 
-def test_submit_rejects_incomplete_choices():
+def test_submit_rejects_incomplete_choices(auth_headers):
     response = client.post(
         "/v1/batches/1/submit",
         json={"choices": [{"card_no": 1, "choice": "long"}]},
+        headers=auth_headers,
     )
     assert response.status_code == 400
 
 
-def test_submit_rejects_unknown_batch():
-    response = client.post("/v1/batches/99/submit", json=GOLDEN_CHOICES)
+def test_submit_rejects_unknown_batch(auth_headers):
+    response = client.post(
+        "/v1/batches/99/submit", json=GOLDEN_CHOICES, headers=auth_headers
+    )
     assert response.status_code == 404
 
 
-def test_submit_rejects_invalid_choice_value():
+def test_submit_rejects_invalid_choice_value(auth_headers):
     bad = {"choices": [{**c, "choice": "hold"} for c in GOLDEN_CHOICES["choices"]]}
-    response = client.post("/v1/batches/1/submit", json=bad)
+    response = client.post("/v1/batches/1/submit", json=bad, headers=auth_headers)
     assert response.status_code == 422  # Pydantic Literal validation

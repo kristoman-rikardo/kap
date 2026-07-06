@@ -1,6 +1,5 @@
-"""Auth verifier tests (CP 2.2). No network: an ES256 keypair is generated
-here and backend.auth's key resolver is monkeypatched (via conftest's
-autouse fixture once Task 2 lands; locally here for Task 1)."""
+"""Auth verifier tests (CP 2.2). No network: conftest's autouse fixture
+monkeypatches backend.auth's key resolver to a local ES256 keypair."""
 
 from __future__ import annotations
 
@@ -14,12 +13,9 @@ from cryptography.hazmat.primitives.asymmetric.ec import (
 )
 
 from backend import auth
+from backend.tests.conftest import KEY, TEST_USER_ID as USER_ID
 
-KEY = generate_private_key(SECP256R1())
-PUBLIC_KEY = KEY.public_key()
 OTHER_KEY = generate_private_key(SECP256R1())
-
-USER_ID = "11111111-2222-3333-4444-555555555555"
 
 
 def make_token(
@@ -35,11 +31,6 @@ def make_token(
         key,
         algorithm="ES256",
     )
-
-
-@pytest.fixture(autouse=True)
-def fake_jwks(monkeypatch):
-    monkeypatch.setattr(auth, "_signing_key_for", lambda token: PUBLIC_KEY)
 
 
 def test_valid_token_returns_sub():
