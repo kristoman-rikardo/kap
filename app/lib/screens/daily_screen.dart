@@ -163,8 +163,11 @@ class _DailyScreenState extends State<DailyScreen> {
               setState(() => _done = true);
               _submit(batch);
             },
-            cardBuilder: (context, index, _, _) =>
-                GameCardView(card: batch.cards[index]),
+            // Only the top card shows content; the card peeking out behind is
+            // face-down like a deck, so text never bleeds through the edges.
+            cardBuilder: (context, index, _, _) => index == _swiped
+                ? GameCardView(card: batch.cards[index])
+                : const _DeckBack(),
           ),
         ),
         _ChoiceBar(
@@ -241,6 +244,33 @@ class _ChoiceBar extends StatelessWidget {
   }
 }
 
+/// The face-down back of the next card in the stack. Deliberately empty of
+/// information — its only job is depth without content bleed.
+class _DeckBack extends StatelessWidget {
+  const _DeckBack();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 2,
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        width: double.infinity,
+        alignment: Alignment.center,
+        child: Text(
+          'KAP',
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+            letterSpacing: 4,
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.08),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _IntroBanner extends StatelessWidget {
   const _IntroBanner({required this.intro, required this.macro});
 
@@ -262,8 +292,9 @@ class _IntroBanner extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // The chips below carry the regime — no duplicated rate text here.
           Text(
-            'Marked: ${intro.marketSentiment} · ${intro.ratePicture}',
+            'Marked: ${intro.marketSentiment}',
             style: theme.textTheme.titleSmall?.copyWith(color: onColor),
           ),
           const SizedBox(height: 8),

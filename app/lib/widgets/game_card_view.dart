@@ -46,18 +46,18 @@ class GameCardView extends StatelessWidget {
                 _CapChip(cap: p.cap),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             MacroStrip(macro: p.macro),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             const _SectionLabel('Nøkkeltall'),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             _MetricsGrid(fundamentals: p.fundamentals, growth: p.growth),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             const _SectionLabel('Situasjon'),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               p.narrative,
-              style: theme.textTheme.bodyLarge?.copyWith(height: 1.45),
+              style: theme.textTheme.bodyMedium?.copyWith(height: 1.4),
             ),
           ],
         ),
@@ -119,17 +119,20 @@ class _MacroStripState extends State<MacroStrip> {
                         spacing: 10,
                         runSpacing: 6,
                         children: [
+                          // Icons carry the dimension (rate arrow, inflation
+                          // flame, sector mood); words only carry the band —
+                          // that's what keeps this to a single line.
                           _MacroChip(
                             icon: rateDirectionIcon(m.rateDirection),
                             text: '${m.rateLevel} rente',
                           ),
                           _MacroChip(
                             icon: Icons.local_fire_department_outlined,
-                            text: 'infl. ${m.inflationBand}',
+                            text: m.inflationBand,
                           ),
                           _MacroChip(
                             icon: sentimentIcon(m.sectorSentiment),
-                            text: 'sektor ${m.sectorSentiment}',
+                            text: m.sectorSentiment,
                           ),
                         ],
                       ),
@@ -302,7 +305,7 @@ class _MetricsGrid extends StatelessWidget {
       children: [
         for (var i = 0; i < rows.length; i++)
           Padding(
-            padding: EdgeInsets.only(bottom: i == rows.length - 1 ? 0 : 14),
+            padding: EdgeInsets.only(bottom: i == rows.length - 1 ? 0 : 12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

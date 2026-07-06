@@ -38,6 +38,9 @@ Ett tydelig fontpar (display + tekst) i stedet for system-default.
 * Haptikk ved valg (`HapticFeedback.selectionClick`) + tydeligere ved reveal;
   lyd av som default (06 §18).
 * Swipe-overlay («LONG»/«SHORT» under draget, 06 §9) — mangler fortsatt.
+* **Reveal-grafen er for døll i dag** (brukerfeedback 2026-07-06): gradient-
+  fyll under din-linjen, draw-in-animasjon venstre→høyre, endepunkt-markører
+  med verdi, sterkere fargekontrast mot indekslinjen.
 * Streak/konfetti: nøktern feiring (f.eks. `confetti`-pakken, lav tetthet)
   først når streak finnes (CP 4.3).
 
