@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -132,9 +133,40 @@ class _FakeApi extends ApiClient {
   }
 }
 
+/// Captures the request instead of hitting the network.
+class _CapturingAdapter implements HttpClientAdapter {
+  RequestOptions? captured;
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options, _, _) async {
+    captured = options;
+    return ResponseBody.fromString(
+      '{"status":"ok"}',
+      200,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
 void main() {
   test('ApiClient applies the dev base URL', () {
     expect(ApiClient().baseUrl, 'http://127.0.0.1:8000');
+  });
+
+  test('ApiClient attaches the Supabase bearer token to requests', () async {
+    final adapter = _CapturingAdapter();
+    final dio = Dio(BaseOptions(baseUrl: 'http://x'))
+      ..httpClientAdapter = adapter;
+    final api = ApiClient(dio: dio, tokenProvider: () async => 'jwt-123');
+
+    await api.health();
+
+    expect(adapter.captured!.headers['Authorization'], 'Bearer jwt-123');
   });
 
   test('DailyBatch.fromJson maps snake_case keys, *_cagr_3y, and null pe', () {

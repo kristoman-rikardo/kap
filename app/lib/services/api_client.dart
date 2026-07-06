@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/daily_batch.dart';
 import '../models/decision.dart';
@@ -6,12 +7,56 @@ import '../models/reveal.dart';
 
 /// Thin HTTP client for the KAP backend.
 ///
-/// CP 0.4: just enough to prove the app reaches the API end-to-end. The full
-/// client (Supabase JWT interceptor, typed errors, the `/v1/*` endpoints) is
-/// built later per 05 §5.
+/// CP 2.2: every request carries the Supabase JWT (05 §3); a 401 triggers one
+/// silent re-auth + retry before surfacing the error. Typed errors and the
+/// remaining `/v1/*` endpoints arrive with later checkpoints (05 §5).
 class ApiClient {
-  ApiClient({Dio? dio, String baseUrl = defaultBaseUrl})
-    : _dio = dio ?? Dio(BaseOptions(baseUrl: baseUrl));
+  ApiClient({Dio? dio, String baseUrl = defaultBaseUrl, this.tokenProvider})
+    : _dio = dio ?? Dio(BaseOptions(baseUrl: baseUrl)) {
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          final token = await _token();
+          if (token != null) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
+          handler.next(options);
+        },
+        onError: (error, handler) async {
+          // Utløpt/ugyldig sesjon: forny én gang og prøv kallet på nytt.
+          if (error.response?.statusCode == 401 && tokenProvider == null) {
+            try {
+              await _reauthenticate();
+              handler.resolve(await _dio.fetch(error.requestOptions));
+              return;
+            } catch (_) {/* fall gjennom til feilen */}
+          }
+          handler.next(error);
+        },
+      ),
+    );
+  }
+
+  /// Test seam: overrides the Supabase session lookup.
+  final Future<String?> Function()? tokenProvider;
+
+  Future<String?> _token() async {
+    if (tokenProvider != null) return tokenProvider!();
+    try {
+      return Supabase.instance.client.auth.currentSession?.accessToken;
+    } catch (_) {
+      return null; // Supabase ikke initialisert (tester) -> uautentisert
+    }
+  }
+
+  Future<void> _reauthenticate() async {
+    final auth = Supabase.instance.client.auth;
+    if (auth.currentSession != null) {
+      await auth.refreshSession();
+    } else {
+      await auth.signInAnonymously();
+    }
+  }
 
   /// Dev default. The iOS simulator and the macOS desktop build both reach the
   /// host machine at `127.0.0.1`. An Android emulator would use `10.0.2.2`, and
