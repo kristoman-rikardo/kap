@@ -3,15 +3,19 @@ import 'package:flutter_card_swiper/flutter_card_swiper.dart';
 
 import '../models/choice.dart';
 import '../models/daily_batch.dart';
+import '../models/decision.dart';
+import '../models/reveal.dart';
 import '../services/api_client.dart';
 import '../widgets/game_card_view.dart';
+import 'reveal_screen.dart';
 
-/// Dagens runde — CP 1.2 (choice capture).
+/// Dagens runde — CP 1.2 (the full loop, end to end).
 ///
 /// Loads the (fake) daily batch and lets you choose per card: swipe left =
 /// Short, right = Long, and Cash via the button (vertical is reserved for
-/// scrolling the card). The Short / Cash / Long button row mirrors this.
-/// Choices are collected; submit + reveal land next. Real scoring in CP 1.3.
+/// scrolling the card). After the fifth choice the round auto-submits and the
+/// reveal takes over the screen (06 §7: playing → submitting → reveal).
+/// Real scoring in CP 1.3.
 class DailyScreen extends StatefulWidget {
   const DailyScreen({super.key, this.apiClient});
 
@@ -28,9 +32,13 @@ class _DailyScreenState extends State<DailyScreen> {
 
   late Future<DailyBatch> _future = _api.getDaily();
   final Map<int, Choice> _choices = {}; // card_no -> choice
+  final Map<int, int> _responseMs = {}; // card_no -> ms shown-to-choice
+  final Stopwatch _cardTimer = Stopwatch();
   int _swiped = 0;
   bool _done = false;
   Choice? _pendingChoice; // set by the Cash button so its swipe records Cash
+  Reveal? _reveal;
+  Object? _submitError;
 
   @override
   void dispose() {
@@ -41,10 +49,34 @@ class _DailyScreenState extends State<DailyScreen> {
   void _reload() {
     setState(() {
       _choices.clear();
+      _responseMs.clear();
+      _cardTimer
+        ..stop()
+        ..reset();
       _swiped = 0;
       _done = false;
+      _reveal = null;
+      _submitError = null;
       _future = _api.getDaily();
     });
+  }
+
+  Future<void> _submit(DailyBatch batch) async {
+    setState(() => _submitError = null);
+    try {
+      final decisions = [
+        for (final card in batch.cards)
+          Decision(
+            cardNo: card.cardNo,
+            choice: _choices[card.cardNo]!,
+            responseMs: _responseMs[card.cardNo],
+          ),
+      ];
+      final reveal = await _api.submitBatch(batch.batchId, decisions);
+      if (mounted) setState(() => _reveal = reveal);
+    } catch (error) {
+      if (mounted) setState(() => _submitError = error);
+    }
   }
 
   Choice? _choiceFor(CardSwiperDirection direction) => switch (direction) {
@@ -59,7 +91,10 @@ class _DailyScreenState extends State<DailyScreen> {
     _pendingChoice = null;
     if (choice == null) return false; // ignore directions we don't use
     setState(() {
-      _choices[batch.cards[previousIndex].cardNo] = choice;
+      final cardNo = batch.cards[previousIndex].cardNo;
+      _choices[cardNo] = choice;
+      _responseMs[cardNo] = _cardTimer.elapsedMilliseconds;
+      _cardTimer.reset();
       _swiped = previousIndex + 1;
     });
     return true;
@@ -87,6 +122,10 @@ class _DailyScreenState extends State<DailyScreen> {
   }
 
   Widget _buildBatch(DailyBatch batch) {
+    if (_done) return _buildAfterPlay(batch);
+
+    if (!_cardTimer.isRunning) _cardTimer.start(); // first card is on screen
+
     final total = batch.cards.length;
     return Column(
       children: [
@@ -96,42 +135,55 @@ class _DailyScreenState extends State<DailyScreen> {
           child: Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              _done ? 'Ferdig' : 'Kort ${_swiped + 1} av $total',
+              'Kort ${_swiped + 1} av $total',
               style: Theme.of(context).textTheme.labelLarge,
             ),
           ),
         ),
         Expanded(
-          child: _done
-              ? _DoneView(choices: _choices, onReplay: _reload)
-              : CardSwiper(
-                  controller: _controller,
-                  cardsCount: total,
-                  numberOfCardsDisplayed: total >= 2 ? 2 : 1,
-                  isLoop: false,
-                  allowedSwipeDirection: const AllowedSwipeDirection.only(
-                    left: true,
-                    right: true,
-                  ),
-                  padding: const EdgeInsets.all(16),
-                  onSwipe: (previousIndex, currentIndex, direction) =>
-                      _onSwipe(batch, previousIndex, direction),
-                  onEnd: () => setState(() => _done = true),
-                  cardBuilder: (context, index, _, _) =>
-                      GameCardView(card: batch.cards[index]),
-                ),
-        ),
-        if (!_done)
-          _ChoiceBar(
-            onShort: () => _controller.swipe(CardSwiperDirection.left),
-            onCash: () {
-              _pendingChoice = Choice.cash;
-              _controller.swipe(CardSwiperDirection.right);
+          child: CardSwiper(
+            controller: _controller,
+            cardsCount: total,
+            numberOfCardsDisplayed: total >= 2 ? 2 : 1,
+            isLoop: false,
+            allowedSwipeDirection: const AllowedSwipeDirection.only(
+              left: true,
+              right: true,
+            ),
+            padding: const EdgeInsets.all(16),
+            onSwipe: (previousIndex, currentIndex, direction) =>
+                _onSwipe(batch, previousIndex, direction),
+            onEnd: () {
+              setState(() => _done = true);
+              _submit(batch);
             },
-            onLong: () => _controller.swipe(CardSwiperDirection.right),
+            cardBuilder: (context, index, _, _) =>
+                GameCardView(card: batch.cards[index]),
           ),
+        ),
+        _ChoiceBar(
+          onShort: () => _controller.swipe(CardSwiperDirection.left),
+          onCash: () {
+            _pendingChoice = Choice.cash;
+            _controller.swipe(CardSwiperDirection.right);
+          },
+          onLong: () => _controller.swipe(CardSwiperDirection.right),
+        ),
       ],
     );
+  }
+
+  /// submitting → reveal (06 §7); a failed submit gets a retry that re-sends
+  /// the same choices (idempotent per 05 §4.3).
+  Widget _buildAfterPlay(DailyBatch batch) {
+    final reveal = _reveal;
+    if (reveal != null) {
+      return RevealView(reveal: reveal, onReplay: _reload);
+    }
+    if (_submitError != null) {
+      return _ErrorView(error: _submitError!, onRetry: () => _submit(batch));
+    }
+    return const Center(child: CircularProgressIndicator());
   }
 }
 
@@ -221,50 +273,6 @@ class _IntroBanner extends StatelessWidget {
   }
 }
 
-class _DoneView extends StatelessWidget {
-  const _DoneView({required this.choices, required this.onReplay});
-
-  final Map<int, Choice> choices;
-  final VoidCallback onReplay;
-
-  int _count(Choice c) => choices.values.where((v) => v == c).length;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Valgene dine',
-              style: theme.textTheme.titleLarge,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Long: ${_count(Choice.long)}   ·   '
-              'Short: ${_count(Choice.short)}   ·   '
-              'Cash: ${_count(Choice.cash)}',
-              style: theme.textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Innsending og scoring kommer i neste steg.',
-              style: theme.textTheme.bodyMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 20),
-            FilledButton(onPressed: onReplay, child: const Text('Spill igjen')),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _ErrorView extends StatelessWidget {
   const _ErrorView({required this.error, required this.onRetry});
 
@@ -280,10 +288,7 @@ class _ErrorView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              'Kunne ikke hente dagens runde',
-              style: theme.textTheme.titleMedium,
-            ),
+            Text('Noe gikk galt', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             Text(
               '$error',

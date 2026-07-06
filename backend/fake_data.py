@@ -13,13 +13,20 @@ year (04 §5.7).
 from __future__ import annotations
 
 from backend.schemas import (
+    Benchmark,
     Card,
     CardPayload,
+    ChoiceValue,
     DailyBatch,
     Fundamentals,
     Growth,
+    Ideal,
+    IdealChoice,
     Intro,
     Macro,
+    Reveal,
+    RevealCard,
+    SubmitRequest,
 )
 
 
@@ -169,4 +176,147 @@ def fake_daily_batch() -> DailyBatch:
             ),
         ),
         cards=_CARDS,
+    )
+
+
+# --- Truth for the fake batch (only ever exposed via submit, 05 §5) ----------
+#
+# The cumulative returns are the golden fixture from 01 §3.3 (H=5, R_m=+60 %,
+# R_f=+8 %), card for card. When the real scoring engine lands (CP 1.3) the
+# fake round therefore *is* the fixture, and a Long/Short/Cash/Long/Short round
+# must reproduce the spec table (points ≈ +70/+89/−50/−49/−91, score ≈ −32).
+
+_HORIZON_YEARS = 5
+_R_M = 0.60  # cumulative benchmark total return
+_R_F = 0.08  # cumulative risk-free return
+
+# (card_no, ticker, name, company_id, R cumulative, clue)
+_TRUTH: list[tuple[int, str, str, int, float, str]] = [
+    (
+        1,
+        "CORX",
+        "Corex Systems",
+        101,
+        1.80,
+        "Høy ROIC og tosifret vekst til moderat prising – investeringene "
+        "ble til varig inntjening.",
+    ),
+    (
+        2,
+        "MERI",
+        "Meridian Energy Partners",
+        102,
+        -0.45,
+        "Høy gearing ble tung å bære da råvareprisene snudde ned.",
+    ),
+    (
+        3,
+        "HLVX",
+        "Halvex Pharmaceuticals",
+        103,
+        0.75,
+        "Defensiv inntjening holdt følge med markedet – patentutløpet ble "
+        "dekket av nye produkter.",
+    ),
+    (
+        4,
+        "BLOM",
+        "Brightloom Brands",
+        104,
+        0.10,
+        "Veksten fortsatte, men lønnsomheten kom aldri – aksjen ble stående "
+        "igjen i et stigende marked.",
+    ),
+    (
+        5,
+        "SCF",
+        "Sterling Crest Financial",
+        105,
+        3.20,
+        "Solid inntjeningsmaskin til lav prising – markedet priset om "
+        "aksjen da marginene løftet seg.",
+    ),
+]
+
+
+def _annualized(R: float) -> float:
+    return (1.0 + R) ** (1.0 / _HORIZON_YEARS) - 1.0
+
+
+def _stub_points(a: float) -> float:
+    """CP 1.2 placeholder: linear in the alpha contribution.
+
+    Replaced by the real tanh point mapping (01 §2) in CP 1.3 — this exists
+    only so the reveal screen has plausible numbers to render.
+    """
+    return round(a * 500.0)
+
+
+def fake_reveal(request: SubmitRequest) -> Reveal:
+    """CP 1.2: a reveal built from hardcoded truth with stub scoring.
+
+    The response *shape* is the locked 01 §7 contract; only the point
+    computation is a placeholder until the scoring engine (CP 1.3).
+    """
+    r_m = _annualized(_R_M)
+    r_f = _annualized(_R_F)
+    alpha_cash = r_f - r_m
+    choice_by_card: dict[int, ChoiceValue] = {
+        c.card_no: c.choice for c in request.choices
+    }
+
+    cards: list[RevealCard] = []
+    hits = 0
+    directional = 0
+    for card_no, ticker, name, company_id, R, clue in _TRUTH:
+        choice = choice_by_card[card_no]
+        r = _annualized(R)
+        alpha = r - r_m
+        if choice == "long":
+            a = alpha
+        elif choice == "short":
+            a = -alpha
+        else:
+            a = alpha_cash
+        if choice != "cash":
+            directional += 1
+            if a > 0:
+                hits += 1
+        cards.append(
+            RevealCard(
+                card_no=card_no,
+                ticker=ticker,
+                name=name,
+                choice=choice,
+                R=R,
+                r=r,
+                alpha=alpha,
+                a=a,
+                points=_stub_points(a),
+                clue=clue,
+                event=None,
+                company_id=company_id,
+            )
+        )
+
+    ideal_choices = [
+        IdealChoice(
+            card_no=card_no, choice="long" if _annualized(R) - r_m > 0 else "short"
+        )
+        for card_no, _, _, _, R, _ in _TRUTH
+    ]
+    ideal_score = sum(
+        _stub_points(abs(_annualized(R) - r_m)) for _, _, _, _, R, _ in _TRUTH
+    )
+
+    return Reveal(
+        session_id=1,
+        score=sum(c.points for c in cards),
+        bonus=0.0,
+        hit_rate=hits / directional if directional else None,
+        benchmark=Benchmark(R_m=_R_M, r_m=r_m, r_f=r_f, alpha_cash=alpha_cash),
+        decision_date="2014-06-02",
+        horizon_years=_HORIZON_YEARS,
+        cards=cards,
+        ideal=Ideal(choices=ideal_choices, score=ideal_score),
     )

@@ -8,7 +8,11 @@ anonymization boundary (05 §5).
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
+
+ChoiceValue = Literal["long", "short", "cash"]
 
 
 class Macro(BaseModel):
@@ -68,3 +72,70 @@ class DailyBatch(BaseModel):
     horizon_years: int
     intro: Intro
     cards: list[Card]
+
+
+# --- Submit / reveal (05 §4.3; the response is the 01 §7 contract) -----------
+#
+# Everything below only ever travels in the POST submit response — the single
+# place truth (name/ticker/alpha/clue) and decision_date are exposed (05 §5).
+
+
+class ChoiceIn(BaseModel):
+    card_no: int
+    choice: ChoiceValue
+    weight: float | None = None  # Manager-only; null in Junior
+    response_ms: int | None = None  # analytics (02 §9)
+
+
+class SubmitRequest(BaseModel):
+    choices: list[ChoiceIn]
+
+
+class Benchmark(BaseModel):
+    """Batch-level truth, frozen per batch so alpha_cash is auditable (01 §6.6)."""
+
+    R_m: float  # cumulative benchmark total return over the horizon
+    r_m: float  # annualized
+    r_f: float  # annualized risk-free
+    alpha_cash: float  # r_f - r_m, same for every card in the batch
+
+
+class RevealCard(BaseModel):
+    """Per-card truth + the user's outcome (01 §7)."""
+
+    card_no: int
+    ticker: str
+    name: str
+    choice: ChoiceValue
+    R: float  # cumulative total return
+    r: float  # annualized
+    alpha: float  # r - r_m
+    a: float  # the user's alpha contribution given their choice (01 §3.1)
+    points: float  # P(a), the squashed game-layer number
+    clue: str
+    event: Literal["acquired", "delisted"] | None = None
+    company_id: int
+
+
+class IdealChoice(BaseModel):
+    card_no: int
+    choice: ChoiceValue
+
+
+class Ideal(BaseModel):
+    """Hindsight portfolio (01 §8): long every alpha>0, short every alpha<0."""
+
+    choices: list[IdealChoice]
+    score: float
+
+
+class Reveal(BaseModel):
+    session_id: int
+    score: float
+    bonus: float
+    hit_rate: float | None  # null when the round had no long/short choices
+    benchmark: Benchmark
+    decision_date: str  # the era — only revealed after submit (05 §5)
+    horizon_years: int
+    cards: list[RevealCard]
+    ideal: Ideal

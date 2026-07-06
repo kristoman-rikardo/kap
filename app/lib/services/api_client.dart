@@ -1,6 +1,8 @@
 import 'package:dio/dio.dart';
 
 import '../models/daily_batch.dart';
+import '../models/decision.dart';
+import '../models/reveal.dart';
 
 /// Thin HTTP client for the KAP backend.
 ///
@@ -31,5 +33,15 @@ class ApiClient {
   Future<DailyBatch> getDaily() async {
     final response = await _dio.get<Map<String, dynamic>>('/v1/daily');
     return DailyBatch.fromJson(response.data!);
+  }
+
+  /// Submits the round's choices and returns the reveal — the only way the
+  /// client ever obtains names/tickers/alpha (05 §4.3, §5).
+  Future<Reveal> submitBatch(int batchId, List<Decision> decisions) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/v1/batches/$batchId/submit',
+      data: {'choices': [for (final d in decisions) d.toJson()]},
+    );
+    return Reveal.fromJson(response.data!);
   }
 }

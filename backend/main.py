@@ -6,10 +6,10 @@ logic, auth, or database exists. The real endpoints (`/v1/daily`, submit, etc.)
 are specced in 05_api.md and arrive in later phases.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
-from backend.fake_data import fake_daily_batch
-from backend.schemas import DailyBatch
+from backend.fake_data import fake_daily_batch, fake_reveal
+from backend.schemas import DailyBatch, Reveal, SubmitRequest
 
 app = FastAPI(title="KAP API", version="0.1.0")
 
@@ -28,3 +28,24 @@ def daily() -> DailyBatch:
     returns name / ticker / decision_date (the anonymization boundary, 05 §5).
     """
     return fake_daily_batch()
+
+
+@app.post("/v1/batches/{batch_id}/submit", response_model=Reveal)
+def submit(batch_id: int, request: SubmitRequest) -> Reveal:
+    """CP 1.2: accept the round's choices and return a hardcoded reveal.
+
+    Stateless for now — no auth, no persistence, no one-attempt-per-daily
+    (those arrive with the DB in Fase 2). Validation mirrors 05 §4.3: the batch
+    must exist and every card must get exactly one choice.
+    """
+    batch = fake_daily_batch()
+    if batch_id != batch.batch_id:
+        raise HTTPException(status_code=404, detail="Ukjent batch")
+    expected = {card.card_no for card in batch.cards}
+    got = [c.card_no for c in request.choices]
+    if sorted(got) != sorted(expected):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Forventet ett valg for hvert av kortene {sorted(expected)}",
+        )
+    return fake_reveal(request)
