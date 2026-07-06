@@ -13,25 +13,13 @@ year (04 §5.7).
 from __future__ import annotations
 
 from backend.schemas import (
-    Benchmark,
     Card,
     CardPayload,
     DailyBatch,
     Fundamentals,
     Growth,
-    Ideal,
-    IdealChoice,
     Intro,
     Macro,
-    Reveal,
-    RevealCard,
-    SubmitRequest,
-)
-from backend.scoring import (
-    BenchmarkTruth,
-    CardTruth,
-    ideal_junior_choices,
-    score_junior,
 )
 
 
@@ -242,60 +230,3 @@ _TRUTH: list[tuple[int, str, str, int, float, str]] = [
         "aksjen da marginene løftet seg.",
     ),
 ]
-
-
-_BENCHMARK = BenchmarkTruth(R_m=_R_M, R_f=_R_F, horizon_years=_HORIZON_YEARS)
-_CARD_TRUTHS = [CardTruth(card_no=t[0], R=t[4]) for t in _TRUTH]
-
-
-def fake_reveal(request: SubmitRequest) -> Reveal:
-    """CP 1.3: hardcoded truth scored by the real engine (01 §3).
-
-    Only the *data* is fake now; the numbers on the reveal are correctly
-    computed. In Fase 2/3 the truth rows come from sealed batches in the DB
-    instead of `_TRUTH` — this function's engine calls stay the same.
-    """
-    result = score_junior(
-        _CARD_TRUTHS,
-        {c.card_no: c.choice for c in request.choices},
-        _BENCHMARK,
-    )
-    meta = {t[0]: t for t in _TRUTH}  # card_no -> truth row
-    ideal = ideal_junior_choices(_CARD_TRUTHS, _BENCHMARK)
-    ideal_result = score_junior(_CARD_TRUTHS, ideal, _BENCHMARK)
-
-    return Reveal(
-        session_id=1,
-        score=result.score,
-        bonus=result.bonus,
-        hit_rate=result.hit_rate,
-        benchmark=Benchmark(
-            R_m=_R_M, r_m=result.r_m, r_f=result.r_f, alpha_cash=result.alpha_cash
-        ),
-        decision_date="2014-06-02",
-        horizon_years=_HORIZON_YEARS,
-        cards=[
-            RevealCard(
-                card_no=c.card_no,
-                ticker=meta[c.card_no][1],
-                name=meta[c.card_no][2],
-                choice=c.choice,  # type: ignore[arg-type]  # validated by the engine
-                R=c.R,
-                r=c.r,
-                alpha=c.alpha,
-                a=c.a,
-                points=c.points,
-                clue=meta[c.card_no][5],
-                event=None,
-                company_id=meta[c.card_no][3],
-            )
-            for c in result.cards
-        ],
-        ideal=Ideal(
-            choices=[
-                IdealChoice(card_no=no, choice=choice)  # type: ignore[arg-type]
-                for no, choice in sorted(ideal.items())
-            ],
-            score=ideal_result.score,
-        ),
-    )

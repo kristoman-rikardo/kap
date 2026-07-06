@@ -97,3 +97,44 @@ def test_submit_rejects_invalid_choice_value(auth_headers):
     bad = {"choices": [{**c, "choice": "hold"} for c in GOLDEN_CHOICES["choices"]]}
     response = client.post("/v1/batches/1/submit", json=bad, headers=auth_headers)
     assert response.status_code == 422  # Pydantic Literal validation
+
+
+def test_submit_records_session_and_decisions(auth_headers, fake_repo):
+    """CP 2.3: submit is the source of game_sessions + decisions (05 §4.3)."""
+    from backend.tests.conftest import TEST_USER_ID
+
+    response = client.post(
+        "/v1/batches/1/submit", json=GOLDEN_CHOICES, headers=auth_headers
+    )
+    assert response.status_code == 200
+
+    (session,) = fake_repo.sessions
+    assert session["user_id"] == TEST_USER_ID
+    assert session["batch_id"] == 1
+    assert session["score"] == pytest.approx(-31.58, abs=0.1)
+    assert session["hit_rate"] == 0.5
+    assert [c.card_no for c in session["choices"]] == [1, 2, 3, 4, 5]
+    assert session["choices"][2].response_ms == 4100
+    # session_id i reveal kommer fra DB-innsettingen
+    assert response.json()["session_id"] == 1
+
+
+def test_submit_rejects_non_live_batch(auth_headers, fake_repo):
+    fake_repo.status = "sealed"
+    response = client.post(
+        "/v1/batches/1/submit", json=GOLDEN_CHOICES, headers=auth_headers
+    )
+    assert response.status_code == 409
+
+
+def test_daily_serves_batch_metadata_from_repo(auth_headers):
+    body = client.get("/v1/daily", headers=auth_headers).json()
+    assert body["horizon_years"] == 5
+    assert body["intro"]["market_sentiment"] == "grådig"
+    assert body["is_daily"] is True
+
+
+def test_daily_404_when_no_live_batch(auth_headers, fake_repo):
+    fake_repo.status = "archived"
+    response = client.get("/v1/daily", headers=auth_headers)
+    assert response.status_code == 404
