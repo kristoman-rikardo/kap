@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config.dart';
-import 'screens/daily_screen.dart';
+import 'screens/home_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,9 +26,9 @@ Future<void> main() async {
 
 /// Root of the KAP app.
 ///
-/// CP 1.1: opens on the (fake) Dagens runde — swipe through 5 anonymized cards.
-/// State management (Riverpod), choice capture + reveal (CP 1.2) and real
-/// scoring (CP 1.3) arrive next; the full theme layer is built later (06 §14).
+/// Opens on Hjem (streak, dagens tilstand, historikk); Dagens runde pushes
+/// from there. State management (Riverpod) and the full theme layer come
+/// later (06 §14).
 class KapApp extends StatelessWidget {
   const KapApp({super.key});
 
@@ -52,7 +52,7 @@ class KapApp extends StatelessWidget {
         ),
       ),
       themeMode: ThemeMode.dark, // dark-first per 06 §14
-      home: const DailyScreen(),
+      home: const HomeScreen(),
     );
   }
 }

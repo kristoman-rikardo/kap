@@ -8,8 +8,10 @@ import 'package:kap/models/choice.dart';
 import 'package:kap/models/decision.dart';
 import 'package:kap/models/game_card.dart';
 import 'package:kap/models/daily_batch.dart';
+import 'package:kap/models/me_stats.dart';
 import 'package:kap/models/reveal.dart';
 import 'package:kap/screens/daily_screen.dart';
+import 'package:kap/screens/home_screen.dart';
 import 'package:kap/screens/reveal_screen.dart';
 import 'package:kap/services/api_client.dart';
 import 'package:kap/widgets/game_card_view.dart';
@@ -118,8 +120,11 @@ const _sampleReveal = Reveal(
 /// In-process stand-in for the backend so the full loop can run in a widget
 /// test without networking. Records what was submitted.
 class _FakeApi extends ApiClient {
+  _FakeApi({this.stats});
+
   int? submittedBatchId;
   List<Decision>? submitted;
+  MeStats? stats;
 
   @override
   Future<DailyBatch> getDaily() async =>
@@ -131,6 +136,9 @@ class _FakeApi extends ApiClient {
     submitted = decisions;
     return _sampleReveal;
   }
+
+  @override
+  Future<MeStats> getStats() async => stats!;
 }
 
 /// Captures the request instead of hitting the network.
@@ -259,6 +267,92 @@ void main() {
     expect(find.text('Fasit: Short'), findsOneWidget);
     // Cash on a falling stock earns the avoided-loss marker (01 §3.2).
     expect(find.text('✓ Unngått tap'), findsOneWidget);
+  });
+
+  test('MeStats.fromJson maps snake_case and null today_score', () {
+    const statsJson = '''
+    {"streak": 2, "rounds_played": 5, "daily_played_today": false,
+     "today_score": null,
+     "recent": [{"session_id": 7, "daily_date": "2026-07-06",
+                 "submitted_at": "2026-07-06T13:10:46+00:00",
+                 "score": -31.58, "hit_rate": 0.5}]}
+    ''';
+    final stats = MeStats.fromJson(
+      jsonDecode(statsJson) as Map<String, dynamic>,
+    );
+    expect(stats.streak, 2);
+    expect(stats.roundsPlayed, 5);
+    expect(stats.dailyPlayedToday, false);
+    expect(stats.todayScore, isNull);
+    expect(stats.recent.single.sessionId, 7);
+    expect(stats.recent.single.score, -31.58);
+  });
+
+  testWidgets('HomeScreen: not played -> CTA; history rows render', (
+    WidgetTester tester,
+  ) async {
+    final api = _FakeApi(
+      stats: const MeStats(
+        streak: 2,
+        roundsPlayed: 3,
+        dailyPlayedToday: false,
+        recent: [
+          SessionSummary(
+            sessionId: 7,
+            dailyDate: '2026-07-06',
+            score: -31.58,
+            hitRate: 0.5,
+          ),
+        ],
+      ),
+    );
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(apiClient: api)));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Spill dagens runde'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget); // streak
+    expect(find.text('Siste runder'), findsOneWidget);
+    expect(find.text('2026-07-06'), findsOneWidget);
+    expect(find.text('treff 50 %'), findsOneWidget);
+  });
+
+  testWidgets('HomeScreen: played today shows score and practice replay', (
+    WidgetTester tester,
+  ) async {
+    final api = _FakeApi(
+      stats: const MeStats(
+        streak: 1,
+        roundsPlayed: 1,
+        dailyPlayedToday: true,
+        todayScore: -31.58,
+        recent: [],
+      ),
+    );
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(apiClient: api)));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Spilt i dag: −32 poeng'), findsOneWidget);
+    expect(find.text('Spill igjen (øving)'), findsOneWidget);
+    expect(find.text('Spill dagens runde'), findsNothing);
+  });
+
+  testWidgets('HomeScreen navigates into the daily round', (
+    WidgetTester tester,
+  ) async {
+    final api = _FakeApi(
+      stats: const MeStats(
+        streak: 0,
+        roundsPlayed: 0,
+        dailyPlayedToday: false,
+        recent: [],
+      ),
+    );
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(apiClient: api)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Spill dagens runde'));
+    await tester.pumpAndSettle();
+    expect(find.text('Kort 1 av 2'), findsOneWidget); // DailyScreen (fake batch)
   });
 
   testWidgets('full loop: choose on every card, auto-submit, see the reveal', (

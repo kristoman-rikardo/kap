@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/daily_batch.dart';
 import '../models/decision.dart';
+import '../models/me_stats.dart';
 import '../models/reveal.dart';
 
 /// Thin HTTP client for the KAP backend.
@@ -78,6 +79,12 @@ class ApiClient {
   Future<DailyBatch> getDaily() async {
     final response = await _dio.get<Map<String, dynamic>>('/v1/daily');
     return DailyBatch.fromJson(response.data!);
+  }
+
+  /// Fetches streak, history and today's played-state (05 §4.5).
+  Future<MeStats> getStats() async {
+    final response = await _dio.get<Map<String, dynamic>>('/v1/me/stats');
+    return MeStats.fromJson(response.data!);
   }
 
   /// Submits the round's choices and returns the reveal — the only way the
