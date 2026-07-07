@@ -129,6 +129,24 @@ class Ideal(BaseModel):
     score: float
 
 
+class SessionSummary(BaseModel):
+    session_id: int
+    daily_date: str | None
+    submitted_at: str | None  # UTC ISO-8601
+    score: float | None
+    hit_rate: float | None
+
+
+class MeStats(BaseModel):
+    """05 §4.5: streak, historikk, aggregater — hjemskjermens datagrunnlag."""
+
+    streak: int
+    rounds_played: int
+    daily_played_today: bool
+    today_score: float | None
+    recent: list[SessionSummary]
+
+
 class Reveal(BaseModel):
     session_id: int
     score: float

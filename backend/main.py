@@ -6,6 +6,8 @@ truth rows (02 §8.1) and logs game_sessions + decisions (02 §9). All DB
 access goes through the Repo dependency — tests inject a FakeRepo.
 """
 
+import datetime as dt
+
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -17,10 +19,13 @@ from backend.schemas import (
     Ideal,
     IdealChoice,
     Intro,
+    MeStats,
     Reveal,
     RevealCard,
+    SessionSummary,
     SubmitRequest,
 )
+from backend.stats import compute_streak
 from backend.scoring import (
     BenchmarkTruth,
     CardTruth,
@@ -64,6 +69,43 @@ def daily(
         horizon_years=meta.horizon_years,
         intro=Intro(**meta.intro),
         cards=cards,
+    )
+
+
+@app.get("/v1/me/stats", response_model=MeStats)
+def me_stats(
+    user_id: str = Depends(current_user),
+    repo: Repo = Depends(get_repo),
+) -> MeStats:
+    """Streak, historikk og dagens tilstand (05 §4.5) — hjemskjermens kilde.
+
+    «Spilt i dag» = minst én sesjon på dagens live daily-batch. Fri replay
+    beholdes i denne fasen; ett-forsøk-håndhevelsen er CP 4.2.
+    """
+    sessions = repo.get_user_sessions(user_id)
+    today = dt.date.today()
+    live = repo.get_live_daily()
+    today_batch_id = live[0].batch_id if live else None
+    todays = [s for s in sessions if s.batch_id == today_batch_id]
+    return MeStats(
+        streak=compute_streak(
+            {s.daily_date for s in sessions if s.daily_date}, today
+        ),
+        rounds_played=len(sessions),
+        daily_played_today=bool(todays),
+        today_score=todays[0].score if todays else None,
+        recent=[
+            SessionSummary(
+                session_id=s.session_id,
+                daily_date=None if s.daily_date is None else str(s.daily_date),
+                submitted_at=(
+                    None if s.submitted_at is None else s.submitted_at.isoformat()
+                ),
+                score=s.score,
+                hit_rate=s.hit_rate,
+            )
+            for s in sessions[:10]
+        ],
     )
 
 

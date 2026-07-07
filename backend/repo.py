@@ -9,7 +9,7 @@ truth only for scoring, everything user-generated in one transaction.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Protocol
 
 from psycopg.rows import dict_row
@@ -43,8 +43,23 @@ class TruthRow:
     event: str  # 'none' | 'delisted' | 'acquired' (02 §8)
 
 
+@dataclass(frozen=True)
+class SessionRow:
+    session_id: int
+    batch_id: int
+    daily_date: date | None
+    submitted_at: datetime | None
+    score: float | None
+    bonus: float | None
+    hit_rate: float | None
+
+
 class Repo(Protocol):
     def get_live_daily(self) -> tuple[BatchMeta, list[Card]] | None: ...
+
+    def get_user_sessions(
+        self, user_id: str, limit: int = 100
+    ) -> list[SessionRow]: ...
 
     def get_batch_meta(self, batch_id: int) -> BatchMeta | None: ...
 
@@ -101,6 +116,33 @@ class PgRepo:
             ).fetchall()
         return _meta_from(row), [
             Card(card_no=c["card_no"], payload=c["public_payload"]) for c in cards
+        ]
+
+    def get_user_sessions(
+        self, user_id: str, limit: int = 100
+    ) -> list[SessionRow]:
+        with pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                """select s.id, s.batch_id, b.daily_date, s.submitted_at,
+                          s.score, s.bonus, s.hit_rate
+                   from game_sessions s
+                   join game_batches b on b.id = s.batch_id
+                   where s.user_id = %s
+                   order by s.submitted_at desc nulls last
+                   limit %s""",
+                (user_id, limit),
+            ).fetchall()
+        return [
+            SessionRow(
+                session_id=r["id"],
+                batch_id=r["batch_id"],
+                daily_date=r["daily_date"],
+                submitted_at=r["submitted_at"],
+                score=None if r["score"] is None else float(r["score"]),
+                bonus=None if r["bonus"] is None else float(r["bonus"]),
+                hit_rate=None if r["hit_rate"] is None else float(r["hit_rate"]),
+            )
+            for r in rows
         ]
 
     def get_batch_meta(self, batch_id: int) -> BatchMeta | None:

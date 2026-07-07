@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.ec import (
 
 from backend import auth
 from backend.fake_data import _HORIZON_YEARS, _R_F, _R_M, _TRUTH, fake_daily_batch
-from backend.repo import BatchMeta, TruthRow, get_repo
+from backend.repo import BatchMeta, SessionRow, TruthRow, get_repo
 from backend.schemas import Card, ChoiceIn
 
 KEY = generate_private_key(SECP256R1())
@@ -104,6 +104,23 @@ class FakeRepo:
             }
         )
         return len(self.sessions)
+
+    def get_user_sessions(
+        self, user_id: str, limit: int = 100
+    ) -> list[SessionRow]:
+        return [
+            SessionRow(
+                session_id=i + 1,
+                batch_id=s["batch_id"],
+                daily_date=self._meta_kwargs["daily_date"],
+                submitted_at=dt.datetime.now(dt.timezone.utc),
+                score=s["score"],
+                bonus=s["bonus"],
+                hit_rate=s["hit_rate"],
+            )
+            for i, s in enumerate(self.sessions)
+            if s["user_id"] == user_id
+        ][::-1][:limit]
 
 
 @pytest.fixture(autouse=True)

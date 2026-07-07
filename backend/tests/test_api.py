@@ -138,3 +138,50 @@ def test_daily_404_when_no_live_batch(auth_headers, fake_repo):
     fake_repo.status = "archived"
     response = client.get("/v1/daily", headers=auth_headers)
     assert response.status_code == 404
+
+
+def test_stats_requires_auth():
+    assert client.get("/v1/me/stats").status_code == 401
+
+
+def test_stats_for_fresh_user(auth_headers):
+    body = client.get("/v1/me/stats", headers=auth_headers).json()
+    assert body == {
+        "streak": 0,
+        "rounds_played": 0,
+        "daily_played_today": False,
+        "today_score": None,
+        "recent": [],
+    }
+
+
+def test_stats_reflect_a_played_round(auth_headers, fake_repo):
+    """Hjemskjermens persistensbevis: spilt runde -> synlig i stats."""
+    client.post("/v1/batches/1/submit", json=GOLDEN_CHOICES, headers=auth_headers)
+    body = client.get("/v1/me/stats", headers=auth_headers).json()
+
+    assert body["rounds_played"] == 1
+    assert body["daily_played_today"] is True
+    assert body["today_score"] == pytest.approx(-31.58, abs=0.1)
+    assert body["streak"] == 1
+    (recent,) = body["recent"]
+    assert recent["session_id"] == 1
+    assert recent["hit_rate"] == 0.5
+
+
+def test_stats_only_count_own_sessions(auth_headers, fake_repo):
+    """En annen brukers sesjon skal ikke lekke inn i mine stats."""
+    from backend.schemas import ChoiceIn
+
+    fake_repo.record_session(
+        user_id="99999999-0000-0000-0000-000000000000",
+        batch_id=1,
+        mode="junior",
+        score=100.0,
+        bonus=0.0,
+        hit_rate=1.0,
+        choices=[ChoiceIn(card_no=n, choice="long") for n in range(1, 6)],
+    )
+    body = client.get("/v1/me/stats", headers=auth_headers).json()
+    assert body["rounds_played"] == 0
+    assert body["daily_played_today"] is False
