@@ -4,7 +4,6 @@ import 'package:flutter_card_swiper/flutter_card_swiper.dart';
 import '../models/choice.dart';
 import '../models/daily_batch.dart';
 import '../models/decision.dart';
-import '../models/game_card.dart';
 import '../models/reveal.dart';
 import '../services/api_client.dart';
 import '../widgets/game_card_view.dart';
@@ -130,12 +129,9 @@ class _DailyScreenState extends State<DailyScreen> {
     final total = batch.cards.length;
     return Column(
       children: [
-        // The macro regime is batch-shared (04 §5.6) — presented fully here,
-        // once, so the cards can carry only a slim reminder strip.
-        _IntroBanner(
-          intro: batch.intro,
-          macro: batch.cards.first.payload.macro,
-        ),
+        // Batch-level framing only. The macro regime lives on each card's
+        // strip (04 §5.6), so it is deliberately NOT repeated here.
+        _IntroBanner(intro: batch.intro),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Align(
@@ -271,11 +267,14 @@ class _DeckBack extends StatelessWidget {
   }
 }
 
+/// Compact batch framing shown before card 1: market sentiment + the one-line
+/// scene-set. The macro regime (rate/inflation/GDP) is intentionally absent —
+/// it lives on every card's macro strip, so repeating it here just wasted
+/// space (user feedback 2026-07-13).
 class _IntroBanner extends StatelessWidget {
-  const _IntroBanner({required this.intro, required this.macro});
+  const _IntroBanner({required this.intro});
 
   final Intro intro;
-  final MacroBox macro; // batch-shared regime (04 §5.6)
 
   @override
   Widget build(BuildContext context) {
@@ -284,69 +283,35 @@ class _IntroBanner extends StatelessWidget {
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: theme.colorScheme.primaryContainer,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // The chips below carry the regime — no duplicated rate text here.
-          Text(
-            'Marked: ${intro.marketSentiment}',
-            style: theme.textTheme.titleSmall?.copyWith(color: onColor),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 14,
-            runSpacing: 4,
-            children: [
-              _RegimeFact(
-                icon: rateDirectionIcon(macro.rateDirection),
-                text: '${macro.rateLevel}, ${macro.rateDirection} rente',
+          Icon(Icons.insights_outlined, size: 18, color: onColor),
+          const SizedBox(width: 10),
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: onColor,
+                  height: 1.35,
+                ),
+                children: [
+                  TextSpan(
+                    text: 'Marked: ${intro.marketSentiment}. ',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  TextSpan(text: intro.note),
+                ],
               ),
-              _RegimeFact(
-                icon: Icons.local_fire_department_outlined,
-                text: 'inflasjon ${macro.inflationBand}',
-              ),
-              _RegimeFact(
-                icon: Icons.show_chart,
-                text: 'BNP ${macro.gdpBand}',
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            intro.note,
-            style: theme.textTheme.bodySmall?.copyWith(color: onColor),
+            ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _RegimeFact extends StatelessWidget {
-  const _RegimeFact({required this.icon, required this.text});
-
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final onColor = theme.colorScheme.onPrimaryContainer;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 15, color: onColor),
-        const SizedBox(width: 4),
-        Text(
-          text,
-          style: theme.textTheme.labelMedium?.copyWith(color: onColor),
-        ),
-      ],
     );
   }
 }

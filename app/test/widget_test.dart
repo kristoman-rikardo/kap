@@ -401,6 +401,22 @@ void main() {
     expect(find.text('Spill igjen (øving)'), findsOneWidget);
   });
 
+  testWidgets('DailyScreen intro is slim: sentiment + note, no regime chips', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(MaterialApp(home: DailyScreen(apiClient: _FakeApi())));
+    await tester.pumpAndSettle();
+
+    // Batch framing is present (RichText spans)...
+    expect(
+      find.textContaining('Marked: grådig', findRichText: true),
+      findsOneWidget,
+    );
+    // ...but the regime facts that duplicated the card strip are gone.
+    expect(find.text('BNP sunn'), findsNothing);
+    expect(find.text('inflasjon moderat'), findsNothing);
+  });
+
   testWidgets('full loop: choose on every card, auto-submit, see the reveal', (
     WidgetTester tester,
   ) async {
