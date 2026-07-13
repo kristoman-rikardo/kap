@@ -45,6 +45,34 @@ class _Session(Protocol):
     def get(self, url, params=None, headers=None, timeout=None): ...
 
 
+class _TokenBucket:
+    """Classic token bucket: refills continuously at `refill_per_sec`, caps at
+    `capacity`. acquire() blocks (via the injected sleep) until a token is
+    free. monotonic/sleep are injected so tests drive time deterministically."""
+
+    def __init__(self, capacity: float, refill_per_sec: float, monotonic, sleep):
+        self._capacity = capacity
+        self._rate = refill_per_sec
+        self._monotonic = monotonic
+        self._sleep = sleep
+        self._tokens = float(capacity)
+        self._last = monotonic()
+
+    def _refill(self) -> None:
+        now = self._monotonic()
+        self._tokens = min(
+            self._capacity, self._tokens + (now - self._last) * self._rate
+        )
+        self._last = now
+
+    def acquire(self) -> None:
+        self._refill()
+        if self._tokens < 1.0:
+            self._sleep((1.0 - self._tokens) / self._rate)
+            self._refill()
+        self._tokens -= 1.0
+
+
 class FMPClient:
     def __init__(
         self,
@@ -69,6 +97,13 @@ class FMPClient:
         self._backoff_base = backoff_base
         self._timeout = timeout
         self._sleep = sleep
+        self._monotonic = monotonic
+        self._bucket = _TokenBucket(
+            capacity=calls_per_min,
+            refill_per_sec=calls_per_min / 60.0,
+            monotonic=monotonic,
+            sleep=sleep,
+        )
 
     def get(self, path: str, **params) -> list | dict:
         """GET `{base}/stable/{path}` with header auth, retrying transient
@@ -76,7 +111,8 @@ class FMPClient:
         url = f"{self._base}{_STABLE}/{path}"
         headers = {"apikey": self._key}
         for attempt in range(self._max_retries):
-            started = time.monotonic()
+            self._bucket.acquire()  # each HTTP attempt spends one quota token
+            started = self._monotonic()
             response = self._session.get(
                 url, params=params, headers=headers, timeout=self._timeout
             )
@@ -85,7 +121,7 @@ class FMPClient:
                 "FMP %s -> %s (%.0f ms)",
                 path,
                 status,
-                (time.monotonic() - started) * 1000,
+                (self._monotonic() - started) * 1000,
             )
             if status == 200:
                 return response.json()

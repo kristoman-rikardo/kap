@@ -129,3 +129,43 @@ def test_5xx_retried_then_raises_server_error():
 def test_503_then_success():
     client = _client([FakeResponse(503), FakeResponse(200, {"ok": 1})])
     assert client.get("income-statement", symbol="AAPL") == {"ok": 1}
+
+
+# --- Task 3: token-bucket rate limiter --------------------------------------
+
+
+def test_bucket_allows_burst_up_to_capacity():
+    # 60 calls/min = 1/sec, capacity 60. A full bucket serves 60 immediate
+    # calls with no throttling sleep.
+    client = _client([FakeResponse(200, {}) for _ in range(60)], calls_per_min=60)
+    for _ in range(60):
+        client.get("x")
+    assert client._test_sleeps == []  # no throttle sleeps
+
+
+def test_61st_call_sleeps_for_a_refill():
+    # Draining the full bucket (60) then one more must wait ~1s for a token
+    # to refill (rate 1/sec).
+    client = _client([FakeResponse(200, {}) for _ in range(61)], calls_per_min=60)
+    for _ in range(60):
+        client.get("x")
+    client.get("x")
+    assert client._test_sleeps == [pytest.approx(1.0, abs=1e-6)]
+
+
+def test_bucket_refills_over_time_between_calls():
+    # After the bucket empties, sleeping (which advances the fake clock)
+    # refills tokens so subsequent calls proceed without further waiting until
+    # the budget is spent again.
+    client = _client([FakeResponse(200, {}) for _ in range(63)], calls_per_min=60)
+    for _ in range(60):
+        client.get("x")
+    client.get("x")  # 61: empty bucket -> sleep ~1s (clock advances), proceed
+    client.get("x")  # 62: refilled 1 token during that sleep, spent again
+    client.get("x")  # 63: same
+    # Calls 61-63 each wait exactly one refill interval (rate 1/sec).
+    assert client._test_sleeps == [
+        pytest.approx(1.0, abs=1e-6),
+        pytest.approx(1.0, abs=1e-6),
+        pytest.approx(1.0, abs=1e-6),
+    ]
