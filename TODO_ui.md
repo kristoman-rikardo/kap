@@ -44,6 +44,26 @@ Ett tydelig fontpar (display + tekst) i stedet for system-default.
 * Streak/konfetti: nøktern feiring (f.eks. `confetti`-pakken, lav tetthet)
   først når streak finnes (CP 4.3).
 
+## 3b. Full tekst-rework (all copy) — HØY prioritet før lansering
+
+> Brukerønske 2026-07-13: «alle tekster suger nå» — trenger en full
+> gjennomgang. Kristoffer vil ha **siste hånd på verket selv**, men
+> `stop-slop`-skillen kan gjøre grovarbeidet først.
+
+Gjelder ALL synlig copy, ikke bare én skjerm:
+* Intro/framing-noter (batch-nivå), narrativer og clue-setninger (nå
+  hardkodet i `fake_data._TRUTH` / `_CARDS` — erstattes av AI-generert i
+  Fase 3, så koordiner: reworken bør treffe *malene/prompten*, ikke bare
+  fixture-teksten).
+* Hjemskjerm: stats-etiketter, dagens-runde-kortets tre tilstander,
+  «Siste runder».
+* Reveal: score-header, fasit-tags, cash-nyanser, footer-noten.
+* Kort: seksjonsetiketter, cap-labels, term-forklaringer (når TermChip kommer).
+* Feil-/tomtilstander og knappetekster overalt.
+* Onboarding (CP 4.3) — skrives fra scratch, bruk anledningen.
+* **Prosess:** kjør `stop-slop` som førstepass på en samlet copy-liste,
+  deretter Kristoffers redigering. Norsk + engelsk (lokalisering, Instr §8).
+
 ## 4. Komponent-polish
 
 * Kort-fronten: sterkere typografisk hierarki på nøkkeltall (tabular, større
