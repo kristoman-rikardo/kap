@@ -104,15 +104,52 @@ def test_reentry_produces_two_intervals():
     ]
 
 
-def test_double_add_is_anomaly_not_crash():
+def test_ticker_reuse_flagged_as_anomaly():
+    """Same ticker string under two different securities (BBBY-type reuse) →
+    two disjoint intervals + a logged anomaly (splitting deferred, 02 §5)."""
+    log = [
+        {"date": "2010-01-01", "symbol": "XYZ", "addedSecurity": "Old XYZ",
+         "removedTicker": "", "removedSecurity": "", "reason": ""},
+        {"date": "2014-01-01", "symbol": "AAA", "addedSecurity": "AAA Inc",
+         "removedTicker": "XYZ", "removedSecurity": "Old XYZ", "reason": ""},
+        {"date": "2018-01-01", "symbol": "XYZ", "addedSecurity": "New XYZ",
+         "removedTicker": "DDD", "removedSecurity": "DDD Inc", "reason": ""},
+    ]
+    build = build_intervals(_today("XYZ", "AAA"), log)
+    xyz = sorted(
+        [c for c in build.constituents if c.ticker == "XYZ"], key=lambda c: c.start
+    )
+    assert len(xyz) == 2  # two disjoint intervals
+    assert any(
+        a.kind == "ticker_reuse" and a.ticker == "XYZ" for a in build.anomalies
+    )
+
+
+def test_no_spurious_anomalies_on_clean_log():
     log = [
         _chg("2010-01-01", added="AAA"),
-        _chg("2011-01-01", added="AAA", removed="ZZZ"),
+        _chg("2015-06-01", added="BBB", removed="AAA"),
     ]
+    build = build_intervals(_today("BBB"), log)
+    assert build.anomalies == []
+
+
+def test_none_fields_do_not_crash():
+    """Real FMP returns null (not '') for removedTicker/removedSecurity on
+    ~7 rows. Neither reconstruction may choke on it."""
+    log = [
+        {
+            "date": "2010-01-01",
+            "symbol": "AAA",
+            "addedSecurity": "AAA Inc",
+            "removedTicker": None,
+            "removedSecurity": None,
+            "reason": "x",
+        }
+    ]
+    assert membership_on({"AAA"}, log, dt.date(2005, 1, 1)) == set()
     build = build_intervals(_today("AAA"), log)
-    assert any(
-        a.kind == "double_add" and a.ticker == "AAA" for a in build.anomalies
-    )
+    assert [c.ticker for c in build.constituents] == ["AAA"]
 
 
 def test_crosscheck_membership_on_matches_intervals():

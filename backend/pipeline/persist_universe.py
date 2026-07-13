@@ -17,51 +17,55 @@ from backend.pipeline.sp500 import UniverseBuild
 INDEX = "SP500"
 
 
-def _company_id(
-    cur,
-    ticker: str,
-    name: str,
-    is_delisted: bool,
-    delisted_date: dt.date | None,
-) -> int:
-    """Upsert on the natural key (ticker, name); name disambiguates ticker
-    reuse across distinct companies (02 §5)."""
-    row = cur.execute(
-        "select id from companies where ticker=%s and name=%s", (ticker, name)
-    ).fetchone()
-    if row:
-        cur.execute(
-            "update companies set is_delisted=%s, delisted_date=%s where id=%s",
-            (is_delisted, delisted_date, row[0]),
-        )
-        return row[0]
-    return cur.execute(
-        """insert into companies (ticker, name, is_delisted, delisted_date)
-           values (%s, %s, %s, %s) returning id""",
-        (ticker, name, is_delisted, delisted_date),
-    ).fetchone()[0]
-
-
 def persist_universe(conn, build: UniverseBuild) -> dict:
-    """Upsert companies and rebuild index_constituents in one transaction."""
+    """Upsert companies (natural key (ticker, name) — name disambiguates ticker
+    reuse, 02 §5) and rebuild index_constituents, batched into a handful of
+    round-trips inside the caller's transaction."""
     with conn.cursor() as cur:
-        ids: dict[tuple[str, str], int] = {}
-        for c in build.companies:
-            ids[(c.ticker, c.name)] = _company_id(
-                cur, c.ticker, c.name, c.is_delisted, c.delisted_date
+        existing = {
+            (t, n): i
+            for t, n, i in cur.execute(
+                "select ticker, name, id from companies"
+            ).fetchall()
+        }
+        to_update = [
+            (c.is_delisted, c.delisted_date, c.ticker, c.name)
+            for c in build.companies
+            if (c.ticker, c.name) in existing
+        ]
+        to_insert = [
+            (c.ticker, c.name, c.is_delisted, c.delisted_date)
+            for c in build.companies
+            if (c.ticker, c.name) not in existing
+        ]
+        if to_update:
+            cur.executemany(
+                """update companies set is_delisted=%s, delisted_date=%s
+                   where ticker=%s and name=%s""",
+                to_update,
             )
-        cur.execute(
-            "delete from index_constituents where index_code=%s", (INDEX,)
+        if to_insert:
+            cur.executemany(
+                """insert into companies (ticker, name, is_delisted, delisted_date)
+                   values (%s, %s, %s, %s)""",
+                to_insert,
+            )
+        # Reload ids (covers freshly inserted rows) and rebuild constituents.
+        ids = {
+            (t, n): i
+            for t, n, i in cur.execute(
+                "select ticker, name, id from companies"
+            ).fetchall()
+        }
+        cur.execute("delete from index_constituents where index_code=%s", (INDEX,))
+        cur.executemany(
+            """insert into index_constituents (index_code, company_id, membership)
+               values (%s, %s, %s)""",
+            [
+                (INDEX, ids[(c.ticker, c.name)], Range(c.start, c.end, bounds="[)"))
+                for c in build.constituents
+            ],
         )
-        for con in build.constituents:
-            cid = ids[(con.ticker, con.name)]
-            # Half-open [start, end); end=None -> [start, infinity).
-            rng = Range(con.start, con.end, bounds="[)")
-            cur.execute(
-                """insert into index_constituents (index_code, company_id, membership)
-                   values (%s, %s, %s)""",
-                (INDEX, cid, rng),
-            )
     conn.commit()
     return {
         "companies": len(build.companies),

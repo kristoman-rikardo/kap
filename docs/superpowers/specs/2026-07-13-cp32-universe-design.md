@@ -31,12 +31,18 @@ tesen). Riktig univers = grunnmuren for at spillet er en ærlig backtest.
    reverser hver endring med `date > D`: fjern `symbol`, legg tilbake
    `removedTicker`. Korrekthets-*orakelet*.
 2. **`build_intervals(today: list[dict], change_log: list[dict])
-   -> UniverseBuild`** — forward event-replay. Per ticker: sortér
-   add/remove-hendelser kronologisk, tilstandsmaskin (ute→inne på add,
-   inne→ute på remove) → disjunkte `[start, end)`-intervaller. Avstem mot
-   dagens liste (i listen → åpent intervall til `infinity`; ikke i listen →
-   lukket, `is_delisted=true`, `delisted_date` = siste remove). Returnerer
-   `UniverseBuild(companies, constituents, anomalies)`.
+   -> UniverseBuild`** — **KORRIGERT under implementering:** forward
+   event-paring viste seg umulig fordi loggen er *ufullstendig* (338 rader ≤
+   2016 er `remove_without_add`/`double_add` — grunnleggermedlemmer fjernet
+   uten matchende add, fra før loggens dekning). Endelig algoritme:
+   **snapshot-diff forankret på orakelet.** Medlemskap er en trappefunksjon
+   som kun endres på endringsdatoer, så `snap[d] = membership_on(d)` beregnes
+   inkrementelt bakover fra dagens sett; en forward-diff av påfølgende
+   snapshots gir hver tickers disjunkte `[start, end)`-intervaller. Konsistent
+   med `membership_on` *by construction* — ingen skjør event-paring, så
+   ufullstendig-logg-artefakter kan ikke korrumpere den. Anomali = ticker-
+   gjenbruk (ulikt security-navn under samme ticker), logget.
+   Returnerer `UniverseBuild(companies, constituents, anomalies)`.
    - `companies`: `[{ticker, name, is_delisted, delisted_date}]` (naturlig
      nøkkel (ticker, name) — navn disambiguerer ticker-gjenbruk).
    - `constituents`: `[{ticker, name, start: date, end: date|None}]`

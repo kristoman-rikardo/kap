@@ -57,3 +57,52 @@ def test_persist_and_query_roundtrip():
             )
             conn.execute("delete from companies where ticker in ('AAA','BBB')")
             conn.commit()
+
+
+@pytest.mark.skipif(
+    not os.environ.get("FMP_API_KEY"), reason="no FMP key"
+)
+def test_survivorship_checkpoint_against_real_data():
+    """CP 3.2 checkpoint: universe(2016-01-04) contains a later-delisted
+    company, proven via both the oracle and the persisted DB, and the two
+    agree on the sampled historical date (no survivorship bias)."""
+    from backend.db import pool
+    from backend.fmp import FMPClient
+    from backend.pipeline.persist_universe import persist_universe, universe
+    from backend.pipeline.sp500 import (
+        build_intervals,
+        fetch_sp500,
+        membership_on,
+    )
+
+    client = FMPClient(key=os.environ["FMP_API_KEY"])
+    today, log = fetch_sp500(client)
+    build = build_intervals(today, log)
+    today_syms = {r["symbol"] for r in today}
+    D = dt.date(2016, 1, 4)
+
+    # Oracle: known later-delisted names present; universe is ~full size.
+    oracle = membership_on(today_syms, log, D)
+    assert {"SNDK", "YHOO", "MON"} <= oracle
+    assert len(oracle) > 490
+
+    with pool().connection() as conn:
+        try:
+            persist_universe(conn, build)
+            db_ids = universe(conn, D)
+            rows = conn.execute(
+                "select ticker, is_delisted from companies where id = any(%s)",
+                (list(db_ids),),
+            ).fetchall()
+            db_tickers = {t for t, _ in rows}
+            assert any(is_del for _, is_del in rows), (
+                "no delisted company in the 2016 universe — survivorship leak"
+            )
+            # Two independent computations must agree at this historical date
+            # (the 21 known anomalies are all 2022+, so none affect 2016).
+            assert db_tickers == oracle
+        finally:
+            conn.execute(
+                "delete from index_constituents where index_code='SP500'"
+            )
+            conn.commit()

@@ -21,6 +21,12 @@ def _parse(d: str) -> dt.date:
     return dt.date.fromisoformat(d)
 
 
+def _s(value) -> str:
+    """Coerce a field to a stripped string. Real FMP returns null (not '')
+    for removedTicker/removedSecurity on some rows — None must not crash."""
+    return (value or "").strip()
+
+
 def membership_on(
     today_symbols: set[str], change_log: list[dict], on: dt.date
 ) -> set[str]:
@@ -33,8 +39,8 @@ def membership_on(
     for row in sorted(change_log, key=lambda r: r["date"], reverse=True):
         if _parse(row["date"]) <= on:
             break
-        added = row["symbol"].strip()
-        removed = row["removedTicker"].strip()
+        added = _s(row["symbol"])
+        removed = _s(row["removedTicker"])
         if added:
             members.discard(added)
         if removed:
@@ -74,103 +80,89 @@ class UniverseBuild:
 
 
 def build_intervals(today: list[dict], change_log: list[dict]) -> UniverseBuild:
-    """Forward event-replay: per ticker, a state machine over its add/remove
-    events yields disjoint [start, end) intervals, reconciled with today's
-    list. Inconsistent transitions are recorded as anomalies, never raised."""
-    today_syms = {r["symbol"] for r in today}
-    today_name = {r["symbol"]: r.get("name", r["symbol"]) for r in today}
+    """Derive membership intervals from the backward-reconstruction snapshots.
 
-    events: dict[str, list[tuple[dt.date, str, str]]] = {}
+    Anchored on today's known-correct set (never assuming the log is complete):
+    membership is a step function that changes only on change dates, so
+    snap[d] = membership_on(d) is computed incrementally backward, then a
+    forward diff of consecutive snapshots emits each ticker's disjoint
+    [start, end) intervals. This is consistent with `membership_on` by
+    construction — no fragile event-pairing, so incomplete-log artifacts
+    (founding members removed without a matching add) cannot corrupt it.
+    """
+    today_syms = {r["symbol"] for r in today}
+    today_name = {r["symbol"]: (r.get("name") or r["symbol"]) for r in today}
+
+    # Changes grouped by date, carrying the added-security name per add.
+    changes_by_date: dict[dt.date, list[tuple[str, str, str]]] = {}
+    add_name_at: dict[tuple[str, dt.date], str] = {}
+    fallback_name: dict[str, str] = {}
     for row in change_log:
         d = _parse(row["date"])
-        added = row["symbol"].strip()
-        removed = row["removedTicker"].strip()
-        if added:
-            events.setdefault(added, []).append(
-                (d, "add", row.get("addedSecurity", "").strip())
-            )
-        if removed:
-            events.setdefault(removed, []).append(
-                (d, "remove", row.get("removedSecurity", "").strip())
-            )
-
-    build = UniverseBuild()
-    for ticker, evs in events.items():
-        evs.sort(key=lambda e: e[0])
-        # Name: prefer today's list for current members, else the most recent
-        # non-empty security name seen in the log.
-        name = today_name.get(ticker) or next(
-            (n for _, _, n in reversed(evs) if n), ticker
+        added, removed = _s(row["symbol"]), _s(row["removedTicker"])
+        added_name, removed_name = _s(row.get("addedSecurity")), _s(
+            row.get("removedSecurity")
         )
-        open_start: dt.date | None = None
-        last_remove: dt.date | None = None
-        for d, kind, _n in evs:
-            if kind == "add":
-                if open_start is None:
-                    open_start = d
-                else:
-                    build.anomalies.append(
-                        Anomaly(
-                            "double_add", d.isoformat(), ticker,
-                            "add while already a member",
-                        )
-                    )
-            else:  # remove
-                if open_start is not None:
-                    build.constituents.append(
-                        Constituent(ticker, name, open_start, d)
-                    )
-                    open_start = None
-                    last_remove = d
-                else:
-                    build.anomalies.append(
-                        Anomaly(
-                            "remove_without_add", d.isoformat(), ticker,
-                            "remove while not a member",
-                        )
-                    )
-        in_today = ticker in today_syms
-        if open_start is not None:
-            if in_today:
-                build.constituents.append(
-                    Constituent(ticker, name, open_start, None)
-                )
-            else:
-                build.anomalies.append(
-                    Anomaly(
-                        "open_but_absent", open_start.isoformat(), ticker,
-                        "log leaves ticker current but absent from today's list",
-                    )
-                )
-        elif in_today:
-            build.anomalies.append(
-                Anomaly(
-                    "closed_but_current", "", ticker,
-                    "today's list has ticker but log ended removed",
-                )
+        changes_by_date.setdefault(d, []).append((added, removed, added_name))
+        if added and added_name:
+            add_name_at[(added, d)] = added_name
+            fallback_name[added] = added_name
+        if removed and removed_name:
+            fallback_name.setdefault(removed, removed_name)
+
+    def name_of(ticker: str) -> str:
+        return today_name.get(ticker) or fallback_name.get(ticker) or ticker
+
+    # snap[d] = membership_on(d), computed by undoing changes backward from
+    # today's set (each snapshot is the membership for the segment [d, next)).
+    current = set(today_syms)
+    snap: dict[dt.date, set[str]] = {}
+    for d in sorted(changes_by_date, reverse=True):
+        snap[d] = set(current)
+        for added, removed, _n in changes_by_date[d]:
+            if added:
+                current.discard(added)
+            if removed:
+                current.add(removed)
+
+    # Forward diff of consecutive snapshots -> intervals. Track the security
+    # name seen at each entry to flag ticker reuse.
+    build = UniverseBuild()
+    open_start: dict[str, dt.date] = {}
+    entry_names: dict[str, set[str]] = {}
+    prev: set[str] = set()
+    for d in sorted(changes_by_date):
+        members = snap[d]
+        for t in members - prev:  # entered the index
+            open_start[t] = d
+            entry_names.setdefault(t, set()).add(
+                add_name_at.get((t, d)) or name_of(t)
             )
+        for t in prev - members:  # left the index
+            build.constituents.append(Constituent(t, name_of(t), open_start.pop(t), d))
+        prev = members
+    for t in list(open_start):  # still members -> open interval
+        build.constituents.append(Constituent(t, name_of(t), open_start.pop(t), None))
+
+    # Companies: one per ticker. is_delisted = absent from today's list;
+    # delisted_date = end of its last interval.
+    for ticker in sorted({c.ticker for c in build.constituents}):
+        in_today = ticker in today_syms
+        ends = [c.end for c in build.constituents if c.ticker == ticker and c.end]
         build.companies.append(
             Company(
                 ticker=ticker,
-                name=name,
+                name=name_of(ticker),
                 is_delisted=not in_today,
-                delisted_date=None if in_today else last_remove,
+                delisted_date=None if in_today else (max(ends) if ends else None),
             )
         )
-
-    # Current members that never appear in the change log (defensive; none
-    # expected from this log). Bound the start with dateFirstAdded.
-    for row in today:
-        if row["symbol"] not in events:
-            sym = row["symbol"]
-            build.companies.append(Company(sym, today_name[sym], False, None))
-            start = row.get("dateFirstAdded")
-            build.constituents.append(
-                Constituent(
-                    sym,
-                    today_name[sym],
-                    _parse(start) if start else dt.date(1957, 3, 4),
-                    None,
+        if len(entry_names.get(ticker, ())) > 1:
+            build.anomalies.append(
+                Anomaly(
+                    "ticker_reuse", "", ticker,
+                    f"multiple securities under one ticker: "
+                    f"{sorted(entry_names[ticker])}",
                 )
             )
     return build
