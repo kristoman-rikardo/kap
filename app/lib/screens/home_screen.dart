@@ -23,7 +23,12 @@ class _HomeScreenState extends State<HomeScreen> {
   late Future<MeStats> _future = _api.getStats();
 
   void _reload() {
-    setState(() => _future = _api.getStats());
+    // Block body on purpose: an arrow `() => _future = _api.getStats()` returns
+    // the assigned Future, which trips setState's "callback returned a Future"
+    // assert and skips markNeedsBuild in debug — the screen never repaints.
+    setState(() {
+      _future = _api.getStats();
+    });
   }
 
   Future<void> _playDaily() async {

@@ -120,11 +120,16 @@ const _sampleReveal = Reveal(
 /// In-process stand-in for the backend so the full loop can run in a widget
 /// test without networking. Records what was submitted.
 class _FakeApi extends ApiClient {
-  _FakeApi({this.stats});
+  _FakeApi({this.stats, this.statsSequence});
 
   int? submittedBatchId;
   List<Decision>? submitted;
   MeStats? stats;
+
+  /// When set, successive getStats() calls return successive entries (the
+  /// last repeats) — models the count changing after a round is played.
+  List<MeStats>? statsSequence;
+  int statsCalls = 0;
 
   @override
   Future<DailyBatch> getDaily() async =>
@@ -138,7 +143,15 @@ class _FakeApi extends ApiClient {
   }
 
   @override
-  Future<MeStats> getStats() async => stats!;
+  Future<MeStats> getStats() async {
+    final seq = statsSequence;
+    if (seq != null) {
+      final value = seq[statsCalls.clamp(0, seq.length - 1)];
+      statsCalls++;
+      return value;
+    }
+    return stats!;
+  }
 }
 
 /// Captures the request instead of hitting the network.
@@ -353,6 +366,39 @@ void main() {
     await tester.tap(find.text('Spill dagens runde'));
     await tester.pumpAndSettle();
     expect(find.text('Kort 1 av 2'), findsOneWidget); // DailyScreen (fake batch)
+  });
+
+  testWidgets('HomeScreen reloads stats after returning from a round', (
+    WidgetTester tester,
+  ) async {
+    // Before the round: 0 rounds. After (on the reload triggered by popping
+    // back): 1 round. This is exactly the "does it update?" scenario.
+    final api = _FakeApi(
+      statsSequence: const [
+        MeStats(streak: 0, roundsPlayed: 0, dailyPlayedToday: false, recent: []),
+        MeStats(
+          streak: 1,
+          roundsPlayed: 1,
+          dailyPlayedToday: true,
+          todayScore: -31.58,
+          recent: [],
+        ),
+      ],
+    );
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(apiClient: api)));
+    await tester.pumpAndSettle();
+    expect(find.text('0'), findsWidgets); // streak + rounds both 0
+
+    // Into the round and straight back out (simulates finishing + back).
+    await tester.tap(find.text('Spill dagens runde'));
+    await tester.pumpAndSettle();
+    final nav = tester.state<NavigatorState>(find.byType(Navigator));
+    nav.pop();
+    await tester.pumpAndSettle();
+
+    // The reload must have run: rounds now 1, streak 1.
+    expect(find.text('1'), findsWidgets);
+    expect(find.text('Spill igjen (øving)'), findsOneWidget);
   });
 
   testWidgets('full loop: choose on every card, auto-submit, see the reveal', (
